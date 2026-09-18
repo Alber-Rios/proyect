@@ -38,6 +38,13 @@ interface BookingModalProps {
   onSuccess: (contract: DigitalContract) => void;
   onOpenAuth?: (mode: 'login' | 'register', notice?: string) => void;
   initialMode?: 'booking' | 'visit';
+  initialStep?: 1 | 2;
+  initialModality?: 'por_hora' | 'por_dia' | 'mensual';
+  initialStartDate?: string;
+  initialEndDate?: string;
+  initialTimeSlots?: string[];
+  initialIntendedUse?: string;
+  hoursCount?: number;
 }
 
 const CATEGORY_NAMES: Record<string, string> = {
@@ -71,14 +78,21 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   onSuccess,
   onOpenAuth,
   initialMode = 'booking',
+  initialStep = 1,
+  initialModality,
+  initialStartDate,
+  initialEndDate,
+  initialTimeSlots,
+  initialIntendedUse,
+  hoursCount,
 }) => {
   const { currentUser, createBooking, requestVisit, quickVerifyUser, savedCards } = useApp();
 
   // Modo activo: 'booking' (Reserva formal) o 'visit' (Solicitud de visita)
   const [activeMode, setActiveMode] = useState<'booking' | 'visit'>(initialMode);
 
-  // Pasos de Reserva: 1 = Fechas y Uso, 2 = Contrato Digital, 3 = Pago Webpay
-  const [bookingStep, setBookingStep] = useState<1 | 2 | 3>(1);
+  // Pasos de Reserva: 1 = Contrato Digital Ley 18.101, 2 = Pago Seguro Webpay
+  const [bookingStep, setBookingStep] = useState<1 | 2>(initialStep || 1);
 
   // Fechas de reserva
   const now = new Date();
@@ -88,10 +102,10 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   const tomorrowStr = formatIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
   const dayAfterTomorrowStr = formatIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2));
 
-  const [startDate, setStartDate] = useState(tomorrowStr);
-  const [endDate, setEndDate] = useState(dayAfterTomorrowStr);
-  const [bookingTimeSlots, setBookingTimeSlots] = useState<string[]>([]);
-  const [intendedUse, setIntendedUse] = useState('');
+  const [startDate, setStartDate] = useState(initialStartDate || tomorrowStr);
+  const [endDate, setEndDate] = useState(initialEndDate || dayAfterTomorrowStr);
+  const [bookingTimeSlots, setBookingTimeSlots] = useState<string[]>(initialTimeSlots || []);
+  const [intendedUse, setIntendedUse] = useState(initialIntendedUse || 'Reunión de equipo y coworking');
   const [acceptContract, setAcceptContract] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
@@ -109,36 +123,39 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   const [visitNotes, setVisitNotes] = useState('');
   const [createdVisit, setCreatedVisit] = useState<VisitRequest | null>(null);
 
+  const [selectedModality, setSelectedModality] = useState<'por_hora' | 'por_dia' | 'mensual'>(
+    initialModality || (space?.rentalModality === 'por_hora' ? 'por_hora' : space?.rentalModality === 'mensual' ? 'mensual' : 'por_dia')
+  );
+
   // Sincronizar usuario o modo inicial al abrir el modal
   useEffect(() => {
     if (isOpen) {
       setActiveMode(initialMode);
-      setBookingStep(1);
+      setBookingStep(initialStep !== undefined ? initialStep : 1);
       setError(null);
       setCreatedVisit(null);
+      if (initialStartDate) setStartDate(initialStartDate);
+      if (initialEndDate) setEndDate(initialEndDate);
+      if (initialTimeSlots) setBookingTimeSlots(initialTimeSlots);
+      if (initialIntendedUse) setIntendedUse(initialIntendedUse);
+      if (initialModality) {
+        setSelectedModality(initialModality);
+      } else if (space) {
+        if (space.rentalModality === 'por_hora') setSelectedModality('por_hora');
+        else if (space.rentalModality === 'mensual') setSelectedModality('mensual');
+        else setSelectedModality('por_dia');
+      }
       if (currentUser) {
         setVisitorName(currentUser.fullName);
         setVisitorEmail(currentUser.email);
         setVisitorPhone(currentUser.phone || '+56 9 8765 4321');
       }
     }
-  }, [isOpen, initialMode, currentUser]);
-
-  const [selectedModality, setSelectedModality] = useState<'por_hora' | 'por_dia' | 'mensual'>(
-    space?.rentalModality === 'por_hora' ? 'por_hora' : space?.rentalModality === 'mensual' ? 'mensual' : 'por_dia'
-  );
-
-  useEffect(() => {
-    if (space) {
-      if (space.rentalModality === 'por_hora') setSelectedModality('por_hora');
-      else if (space.rentalModality === 'mensual') setSelectedModality('mensual');
-      else setSelectedModality('por_dia');
-    }
-  }, [space]);
+  }, [isOpen, initialMode, initialStep, currentUser, initialStartDate, initialEndDate, initialTimeSlots, initialIntendedUse, initialModality, space]);
 
   // Cálculo de unidades y montos en CLP según modalidad
   const calculations = useMemo(() => {
-    if (!space) return { units: 1, label: 'día', subtotal: 0, platformFee: 0, deposit: 0, total: 0 };
+    if (!space) return { units: 1, label: 'día', subtotal: 0, platformFee: 0, deposit: 0, total: 0, basePrice: 0 };
 
     const start = new Date(startDate);
     const end = new Date(endDate);
@@ -146,20 +163,20 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     let daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     if (daysDiff <= 0) daysDiff = 1;
 
-    const activeModality = space.rentalModality === 'abierto' ? selectedModality : (space.rentalModality || 'por_dia');
+    const activeModality = space.rentalModality === 'abierto' ? selectedModality : (space.rentalModality || selectedModality || 'por_dia');
 
     let units = daysDiff;
     let label = daysDiff === 1 ? 'día' : 'días';
     let basePrice = space.pricePerDay;
 
     if (activeModality === 'por_hora') {
-      units = bookingTimeSlots.length > 0 ? bookingTimeSlots.length * 2 : 2; // Cada bloque es de 2 horas
-      label = 'horas';
-      basePrice = space.pricePerHour || Math.round(space.pricePerDay / 6);
+      units = hoursCount || (bookingTimeSlots.length > 0 ? bookingTimeSlots.length * 2 : 2);
+      label = units === 1 ? 'hora' : 'horas';
+      basePrice = space.pricePerHour || 45000;
     } else if (activeModality === 'mensual') {
       units = Math.ceil(daysDiff / 30) || 1;
       label = units === 1 ? 'mes' : 'meses';
-      basePrice = space.pricePerMonth || (space.pricePerDay * 25);
+      basePrice = space.pricePerMonth || 3800000;
     } else {
       // por_dia (default)
       units = daysDiff;
@@ -169,11 +186,11 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
     const subtotal = units * basePrice;
     const platformFee = Math.round(subtotal * 0.05); // 5% fee de servicio Spotly
-    const deposit = space.securityDeposit || Math.round(basePrice * 0.5); // Garantía retornable
+    const deposit = space.securityDeposit || (activeModality === 'por_hora' ? 50000 : 150000); // Garantía retornable
     const total = subtotal + platformFee + deposit;
 
     return { units, label, subtotal, platformFee, deposit, total, basePrice };
-  }, [space, startDate, endDate, selectedModality]);
+  }, [space, startDate, endDate, selectedModality, hoursCount, bookingTimeSlots]);
 
   // Enviar Reserva
   const handlePaymentSuccess = async (paymentData: PaymentSimulationData) => {
@@ -189,7 +206,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
     if (!acceptContract || !signatureDataUrl) {
       setError('Debes aceptar y firmar electrónicamente el Contrato Digital de Arrendamiento (Ley 18.101).');
-      setBookingStep(2);
+      setBookingStep(1);
       return;
     }
 
@@ -226,6 +243,15 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     e.preventDefault();
     if (!space) return;
 
+    if (!currentUser) {
+      setError('Debes iniciar sesión o registrarte para agendar una visita con el anfitrión.');
+      if (onOpenAuth) {
+        onClose();
+        onOpenAuth('login', 'Inicia sesión o regístrate para coordinar una visita al espacio.');
+      }
+      return;
+    }
+
     if (!visitorName.trim()) {
       setError('Por favor ingresa tu nombre completo para la visita.');
       return;
@@ -244,9 +270,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         spaceTitle: space.title,
         spaceAddress: `${space.address}, ${space.commune}`,
         spaceImage: space.images?.[0] || 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=800&q=80',
-        tenantId: currentUser ? currentUser.id : 'guest-visitor',
+        tenantId: currentUser.id,
         tenantName: visitorName.trim(),
-        tenantEmail: visitorEmail.trim() || 'contacto@spotly.cl',
+        tenantEmail: visitorEmail.trim() || currentUser.email,
         tenantPhone: visitorPhone.trim(),
         ownerId: space.ownerId,
         ownerName: space.ownerName,
@@ -352,229 +378,89 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         {/* CONTENIDO SCROLLABLE */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5">
           {/* ============================================================ */}
-          {/* MODO 1: FLUJO DE RESERVA DIRECTA (INTUITIVO Y EN 3 PASOS)    */}
+          {/* MODO 1: FLUJO DE RESERVA DIRECTA (CONTRATO Y PAGO)           */}
           {/* ============================================================ */}
           {activeMode === 'booking' && (
             <div className="space-y-5">
-              {/* PASO 1: SELECCIÓN DE FECHAS Y ACTIVIDAD PROPUESTA */}
-              {bookingStep === 1 && (
-                <div className="space-y-5 animate-in fade-in">
-                  {/* Selector de Modalidad si el espacio está 'Abierto a todas las modalidades' */}
-                  {space.rentalModality === 'abierto' && (
-                    <div className="p-3.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl space-y-2">
-                      <div className="text-xs font-bold text-amber-900 flex items-center justify-between">
-                        <span>⚡ Espacio Abierto a Todas las Modalidades</span>
-                        <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold">
-                          Elige tu preferencia
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedModality('por_hora')}
-                          className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${
-                            selectedModality === 'por_hora'
-                              ? 'bg-amber-600 text-white shadow-xs'
-                              : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
-                          }`}
-                        >
-                          ⏱️ Por Hora
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedModality('por_dia')}
-                          className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${
-                            selectedModality === 'por_dia'
-                              ? 'bg-amber-600 text-white shadow-xs'
-                              : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
-                          }`}
-                        >
-                          📅 Por Día
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedModality('mensual')}
-                          className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${
-                            selectedModality === 'mensual'
-                              ? 'bg-amber-600 text-white shadow-xs'
-                              : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
-                          }`}
-                        >
-                          🏢 Por Mes
-                        </button>
-                      </div>
-                    </div>
-                  )}
+              {/* Indicador Visual de Pasos (Directo y Transparente) */}
+              <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black transition ${
+                      bookingStep === 1
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-emerald-600 text-white'
+                    }`}
+                  >
+                    {bookingStep > 1 ? <Check className="w-3.5 h-3.5" /> : '1'}
+                  </div>
+                  <span className={`text-xs font-bold ${bookingStep === 1 ? 'text-slate-900' : 'text-slate-500'}`}>
+                    1. Contrato Digital (Ley 18.101)
+                  </span>
+                </div>
 
-                  {/* Selectores de Fechas y Disponibilidad */}
-                  {selectedModality === 'por_hora' ? (
-                    <div className="space-y-4">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                          <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Día de Reserva</span>
-                        </label>
-                        <input
-                          type="date"
-                          min={tomorrowStr}
-                          value={startDate}
-                          onChange={(e) => {
-                            setStartDate(e.target.value);
-                            setEndDate(e.target.value);
-                          }}
-                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Horarios Disponibles para el {startDate.split('-').reverse().join('-')}</span>
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {TIME_SLOTS.map((slot) => (
-                            <button
-                              key={slot.id}
-                              type="button"
-                              onClick={() => {
-                                setBookingTimeSlots(prev => 
-                                  prev.includes(slot.id) 
-                                    ? prev.filter(id => id !== slot.id)
-                                    : [...prev, slot.id]
-                                );
-                              }}
-                              className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
-                                bookingTimeSlots.includes(slot.id)
-                                  ? 'bg-rose-600 border-rose-600 text-white font-bold shadow-xs'
-                                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              <div className="text-[10px] opacity-80 uppercase tracking-wider">{slot.period}</div>
-                              <div className="text-xs font-bold mt-0.5">{slot.label}</div>
-                            </button>
-                          ))}
+                <div className="h-0.5 w-12 bg-slate-200 hidden sm:block" />
+
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black transition ${
+                      bookingStep === 2
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-slate-200 text-slate-500'
+                    }`}
+                  >
+                    2
+                  </div>
+                  <span className={`text-xs font-bold ${bookingStep === 2 ? 'text-slate-900' : 'text-slate-400'}`}>
+                    2. Pago Seguro Webpay Plus
+                  </span>
+                </div>
+              </div>
+
+              {/* PASO 1: CONTRATO DIGITAL LEY 18.101 */}
+              {bookingStep === 1 && (
+                <div className="space-y-4 animate-in fade-in">
+                  {/* Banner de inicio de sesión requerido si el usuario no está autenticado */}
+                  {!currentUser && (
+                    <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50/60 border border-amber-200 rounded-2xl space-y-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                          <Lock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-amber-950">Inicia sesión o regístrate para formalizar</h4>
+                          <p className="text-[11px] text-amber-850">
+                            Para individualizar legalmente al arrendatario con su RUT y resguardar la garantía en custodia (escrow), debes contar con una cuenta activa.
+                          </p>
                         </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                          <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Fecha de Inicio</span>
-                        </label>
-                        <input
-                          type="date"
-                          min={tomorrowStr}
-                          value={startDate}
-                          onChange={(e) => {
-                            setStartDate(e.target.value);
-                            if (e.target.value > endDate) {
-                              setEndDate(e.target.value);
-                            }
-                          }}
-                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                          <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Fecha de Término</span>
-                        </label>
-                        <input
-                          type="date"
-                          min={startDate}
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
-                        />
-                      </div>
+                      {onOpenAuth && (
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onOpenAuth('login', 'Inicia sesión para formalizar el contrato de arriendo.');
+                            }}
+                            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                          >
+                            Iniciar Sesión
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onOpenAuth('register', 'Regístrate gratis para suscribir contratos de arriendo.');
+                            }}
+                            className="px-3.5 py-1.5 bg-white hover:bg-amber-100 border border-amber-300 text-amber-950 rounded-xl text-xs font-bold transition cursor-pointer"
+                          >
+                            Crear Cuenta
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* Propósito de Uso / Actividad */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                      <span>¿Qué actividad o uso le darás al espacio?</span>
-                      <span className="text-[11px] text-slate-400">Requerido por Ley 18.101</span>
-                    </label>
-
-                    {/* Chips de sugerencias rápidas */}
-                    <div className="flex flex-wrap gap-1.5">
-                      {POPULAR_USES.map((use) => (
-                        <button
-                          key={use}
-                          type="button"
-                          onClick={() => setIntendedUse(use)}
-                          className={`text-[11px] px-2.5 py-1 rounded-lg border transition cursor-pointer ${
-                            intendedUse === use
-                              ? 'bg-rose-600 border-rose-600 text-white font-bold'
-                              : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          {use}
-                        </button>
-                      ))}
-                    </div>
-
-                    <textarea
-                      rows={2}
-                      value={intendedUse}
-                      onChange={(e) => setIntendedUse(e.target.value)}
-                      placeholder="Ej. Taller presencial de diseño para 10 personas, uso de computadores portátiles y proyector."
-                      className="w-full p-3 rounded-xl border border-slate-300 text-xs text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
-                    />
-                  </div>
-
-                  {/* Resumen de Valores Transparente */}
-                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                    <div className="flex justify-between text-xs text-slate-600">
-                      <span>{formatClp(calculations.basePrice)} × {calculations.units} {calculations.label}</span>
-                      <span className="font-semibold text-slate-900">{formatClp(calculations.subtotal)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-slate-600">
-                      <span className="flex items-center gap-1">
-                        <span>Garantía de Arriendo (Retornable)</span>
-                        <Info className="w-3.5 h-3.5 text-slate-400" />
-                      </span>
-                      <span className="font-semibold text-slate-900">{formatClp(calculations.deposit)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-slate-600">
-                      <span>Servicio de Plataforma Spotly (5%)</span>
-                      <span className="font-semibold text-slate-900">{formatClp(calculations.platformFee)}</span>
-                    </div>
-                    <div className="pt-2 border-t border-slate-200 flex justify-between text-sm font-black text-slate-900">
-                      <span>Total en CLP a Transferir/Pagar</span>
-                      <span className="text-rose-600">{formatClp(calculations.total)}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (selectedModality === 'por_hora' && bookingTimeSlots.length === 0) {
-                          setError('Por favor selecciona al menos un horario disponible.');
-                          return;
-                        }
-                        if (!intendedUse.trim()) {
-                          setError('Por favor selecciona o describe el propósito de uso del espacio.');
-                          return;
-                        }
-                        setError(null);
-                        setBookingStep(2);
-                      }}
-                      className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs transition flex items-center gap-2 cursor-pointer shadow-md"
-                    >
-                      <span>Continuar al Contrato Digital</span>
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* PASO 2: CONTRATO DIGITAL LEY 18.101 */}
-              {bookingStep === 2 && (
-                <div className="space-y-4 animate-in fade-in">
                   <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-start justify-between border-b border-slate-100 pb-3">
                       <div>
@@ -591,32 +477,32 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                       </span>
                     </div>
 
-                    <div className="text-[11px] text-slate-700 space-y-3 leading-relaxed font-serif">
-                      <p className="text-justify">
-                        En Santiago de Chile, a {new Date().toLocaleDateString('es-CL')}, se celebra el presente contrato de arrendamiento entre las siguientes partes:
+                    <div className="text-xs sm:text-[13px] text-slate-800 space-y-3.5 leading-relaxed">
+                      <p>
+                        En Santiago de Chile, a 18-09-2026, se celebra el presente contrato de arrendamiento entre las siguientes partes:
                       </p>
                       
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2 font-sans">
+                      <div className="space-y-2 py-1">
                         <p>
-                          <strong>Arrendador (Propietario):</strong> {space.ownerName} (RUT: {space.ownerRut || '15.482.901-K'})
+                          <strong>Arrendador (Propietario):</strong> {space.ownerName || 'Carlos Muñoz Echeverría'} (RUT: {space.ownerRut || '14.258.963-7'})
                         </p>
                         <p>
-                          <strong>Arrendatario:</strong> {currentUser?.fullName || 'Usuario no autenticado'} (RUT: {currentUser?.rut || 'Pendiente'})
+                          <strong>Arrendatario:</strong> {currentUser?.fullName || 'Usuario no registrado (Inicio de sesión requerido)'} (RUT: {currentUser?.rut || 'Pendiente de autenticación'})
                         </p>
                         <p>
                           <strong>Inmueble:</strong> {space.title}, ubicado en {space.address}, {space.commune}.
                         </p>
                       </div>
 
-                      <p className="text-justify">
-                        <strong>Primero:</strong> El Arrendador da en arriendo el Inmueble detallado precedentemente al Arrendatario, quien lo acepta para el uso exclusivo de: <strong>{intendedUse || 'Uso comercial / Coworking'}</strong>.
+                      <p>
+                        <strong>Primero:</strong> El Arrendador da en arriendo el Inmueble detallado precedentemente al Arrendatario, quien lo acepta para el uso exclusivo de: <strong>{intendedUse || 'Reunión de equipo y coworking'}</strong>.
                       </p>
                       
-                      <p className="text-justify">
-                        <strong>Segundo:</strong> La vigencia de este contrato será desde el <strong>{startDate}</strong> hasta el <strong>{endDate}</strong>, comprendiendo un total de <strong>{calculations.units} {calculations.label}</strong>.
+                      <p>
+                        <strong>Segundo:</strong> La vigencia de este contrato será desde el <strong>{startDate || '2026-09-19'}</strong> hasta el <strong>{endDate || '2026-09-20'}</strong>, comprendiendo un total de <strong>{calculations.units} {calculations.label}</strong>.
                       </p>
                       
-                      <p className="text-justify">
+                      <p>
                         <strong>Tercero:</strong> El valor acordado para este período es de <strong>{formatClp(calculations.subtotal)}</strong>, más una garantía retornable de <strong>{formatClp(calculations.deposit)}</strong>, totalizando a pagar <strong>{formatClp(calculations.total)}</strong> (incluyendo tarifas de servicio).
                       </p>
                     </div>
@@ -643,16 +529,24 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                   <div className="flex items-center justify-between pt-2">
                     <button
                       type="button"
-                      onClick={() => setBookingStep(1)}
+                      onClick={onClose}
                       className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
                     >
                       <ChevronLeft className="w-4 h-4" />
-                      <span>Volver</span>
+                      <span>Volver al Detalle</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => {
+                        if (!currentUser) {
+                          setError('Debes iniciar sesión o registrarte con tu RUT para emitir el contrato y proceder al pago.');
+                          if (onOpenAuth) {
+                            onClose();
+                            onOpenAuth('login', 'Debes iniciar sesión o registrarte para realizar tu reserva.');
+                          }
+                          return;
+                        }
                         if (!acceptContract) {
                           setError('Debes marcar la casilla para suscribir y firmar el contrato digital.');
                           return;
@@ -662,7 +556,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                           return;
                         }
                         setError(null);
-                        setBookingStep(3);
+                        setBookingStep(2);
                       }}
                       className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs transition flex items-center gap-2 cursor-pointer shadow-md"
                     >
@@ -673,8 +567,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 </div>
               )}
 
-              {/* PASO 3: PAGO SEGURO WEBPAY / TARJETAS */}
-              {bookingStep === 3 && (
+              {/* PASO 2: PAGO SEGURO WEBPAY / TARJETAS */}
+              {bookingStep === 2 && (
                 <div className="space-y-4 animate-in fade-in">
                   {/* Banner de Estado de Verificación del Usuario */}
                   {!currentUser ? (
@@ -724,7 +618,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                     initialCardHolder={currentUser?.fullName.toUpperCase()}
                     initialRut={currentUser?.rut}
                     onPaymentSuccess={handlePaymentSuccess}
-                    onCancel={() => setBookingStep(2)}
+                    onCancel={() => setBookingStep(1)}
                   />
                 </div>
               )}

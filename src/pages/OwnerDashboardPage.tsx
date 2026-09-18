@@ -3,6 +3,7 @@ import { Space, Reservation, SpaceCategory, SpaceEnvironment, DigitalContract, V
 import { useApp } from '../context/AppContext.tsx';
 import { formatClp, formatRut, getSpaceRateInfo } from '../utils/formatters.ts';
 import { ContractModal } from '../components/ContractModal.tsx';
+import { RentalModalitySelector } from '../components/RentalModalitySelector.tsx';
 import {
   Building,
   PlusCircle,
@@ -94,7 +95,29 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
   const [newDescription, setNewDescription] = useState('');
   const [newCategory, setNewCategory] = useState<SpaceCategory>('office');
   const [newEnvironment, setNewEnvironment] = useState<SpaceEnvironment>('cerrado');
-  const [newRentalModality, setNewRentalModality] = useState<'por_hora' | 'por_dia' | 'mensual' | 'abierto'>('por_dia');
+  const [newRentalModality, setNewRentalModality] = useState<'por_hora' | 'por_dia' | 'mensual' | 'abierto'>('abierto');
+  
+  // Estados de modalidades y tarifas tipo interruptor
+  const [enableHourly, setEnableHourly] = useState(true);
+  const [hourlyPrice, setHourlyPrice] = useState<number | ''>(45000);
+  const [hourlyMinHours, setHourlyMinHours] = useState(2);
+  const [hourlyInstantBooking, setHourlyInstantBooking] = useState(true);
+
+  const [enableDaily, setEnableDaily] = useState(true);
+  const [dailyPrice, setDailyPrice] = useState<number | ''>(280000);
+  const [dailyOpeningHours, setDailyOpeningHours] = useState('09:00 - 19:00');
+
+  const [enableMonthly, setEnableMonthly] = useState(true);
+  const [monthlyPrice, setMonthlyPrice] = useState<number | ''>(3800000);
+
+  const computedRentalModality = useMemo<'abierto' | 'por_hora' | 'por_dia' | 'mensual'>(() => {
+    const activeCount = (enableHourly ? 1 : 0) + (enableDaily ? 1 : 0) + (enableMonthly ? 1 : 0);
+    if (activeCount > 1) return 'abierto';
+    if (enableHourly) return 'por_hora';
+    if (enableMonthly) return 'mensual';
+    return 'por_dia';
+  }, [enableHourly, enableDaily, enableMonthly]);
+
   const [newCommune, setNewCommune] = useState('Las Condes');
   const [newAddress, setNewAddress] = useState('');
   const [newPrice, setNewPrice] = useState<number | ''>(0);
@@ -255,6 +278,40 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
     setNewRentalModality(mod);
     setNewCommune(space.commune);
     setNewAddress(space.address);
+
+    if (mod === 'abierto') {
+      setEnableHourly(Boolean(space.pricePerHour));
+      setEnableDaily(Boolean(space.pricePerDay));
+      setEnableMonthly(Boolean(space.pricePerMonth));
+      if (!space.pricePerHour && !space.pricePerDay && !space.pricePerMonth) {
+        setEnableHourly(true);
+        setEnableDaily(true);
+        setEnableMonthly(true);
+      }
+    } else if (mod === 'por_hora') {
+      setEnableHourly(true);
+      setEnableDaily(false);
+      setEnableMonthly(false);
+    } else if (mod === 'mensual') {
+      setEnableHourly(false);
+      setEnableDaily(false);
+      setEnableMonthly(true);
+    } else {
+      setEnableHourly(false);
+      setEnableDaily(true);
+      setEnableMonthly(false);
+    }
+
+    setHourlyPrice(space.pricePerHour || (space.pricePerDay ? Math.round(space.pricePerDay / 8) : 45000));
+    setHourlyMinHours(space.minBookingHours || 2);
+    setHourlyInstantBooking(space.instantBooking ?? true);
+
+    setDailyPrice(space.pricePerDay || 280000);
+    setDailyOpeningHours(space.openingHours || '09:00 - 19:00');
+
+    setMonthlyPrice(space.pricePerMonth || (space.pricePerDay ? space.pricePerDay * 22 : 3800000));
+    setNewSecurityDeposit(space.securityDeposit ?? 0);
+
     const effectivePrice = mod === 'por_hora' 
       ? (space.pricePerHour || Math.round(space.pricePerDay / 8))
       : mod === 'mensual'
@@ -263,7 +320,6 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
     setNewPrice(effectivePrice);
     setNewCapacity(space.capacity);
     setNewSurfaceM2(space.surfaceM2);
-    setNewSecurityDeposit(space.securityDeposit);
     setNewMinBookingDays(space.minBookingDays || 1);
     setNewOpeningHours(space.openingHours || '');
     setSelectedAmenities(space.amenities || []);
@@ -277,10 +333,19 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
     setNewTitle('');
     setNewDescription('');
     setNewAddress('');
+    setEnableHourly(true);
+    setEnableDaily(true);
+    setEnableMonthly(true);
+    setHourlyPrice(45000);
+    setHourlyMinHours(2);
+    setHourlyInstantBooking(true);
+    setDailyPrice(280000);
+    setDailyOpeningHours('09:00 - 19:00');
+    setMonthlyPrice(3800000);
+    setNewSecurityDeposit(0);
     setNewPrice(0);
     setNewCapacity(0);
     setNewSurfaceM2(0);
-    setNewSecurityDeposit(0);
     setNewMinBookingDays(1);
     setNewOpeningHours('');
     setSelectedAmenities([]);
@@ -306,15 +371,14 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
       return;
     }
 
-    const priceNum = Number(newPrice);
-    const unit = newRentalModality === 'por_hora' ? 'hour' : newRentalModality === 'mensual' ? 'month' : 'day';
-    const dayPrice = newRentalModality === 'por_dia' 
-      ? priceNum 
-      : newRentalModality === 'por_hora' 
-      ? priceNum * 8 
-      : Math.round(priceNum / 30);
-    const hourPrice = newRentalModality === 'por_hora' ? priceNum : undefined;
-    const monthPrice = newRentalModality === 'mensual' ? priceNum : undefined;
+    const hourPrice = enableHourly ? (Number(hourlyPrice) || 35000) : undefined;
+    const dayPrice = enableDaily 
+      ? (Number(dailyPrice) || 280000) 
+      : enableHourly 
+      ? Math.round(Number(hourlyPrice) * 8) 
+      : Math.round(Number(monthlyPrice) / 30) || 280000;
+    const monthPrice = enableMonthly ? (Number(monthlyPrice) || 3800000) : undefined;
+    const unit = computedRentalModality === 'por_hora' ? 'hour' : computedRentalModality === 'mensual' ? 'month' : 'day';
 
     if (editingSpace) {
       updateSpace(editingSpace.id, {
@@ -322,7 +386,7 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
         description: newDescription,
         category: newCategory,
         spaceEnvironment: newEnvironment,
-        rentalModality: newRentalModality,
+        rentalModality: computedRentalModality,
         priceUnit: unit,
         commune: newCommune,
         address: newAddress,
@@ -333,10 +397,12 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
         surfaceM2: Number(newSurfaceM2),
         amenities: selectedAmenities,
         rules: selectedRules,
-        openingHours: newOpeningHours,
+        openingHours: dailyOpeningHours || newOpeningHours || '09:00 - 19:00',
         securityDeposit: Number(newSecurityDeposit),
         images: newImages,
         minBookingDays: Number(newMinBookingDays),
+        minBookingHours: hourlyMinHours,
+        instantBooking: hourlyInstantBooking,
       });
 
       alert('¡Espacio modificado y actualizado exitosamente!');
@@ -346,7 +412,7 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
         description: newDescription,
         category: newCategory,
         spaceEnvironment: newEnvironment,
-        rentalModality: newRentalModality,
+        rentalModality: computedRentalModality,
         priceUnit: unit,
         commune: newCommune,
         region: 'Región Metropolitana',
@@ -358,12 +424,14 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
         surfaceM2: Number(newSurfaceM2),
         amenities: selectedAmenities,
         rules: selectedRules,
-        openingHours: newOpeningHours,
+        openingHours: dailyOpeningHours || newOpeningHours || '09:00 - 19:00',
         securityDeposit: Number(newSecurityDeposit),
         images: newImages,
         isVerified: true,
         status: 'pending_approval',
         minBookingDays: Number(newMinBookingDays),
+        minBookingHours: hourlyMinHours,
+        instantBooking: hourlyInstantBooking,
       });
 
       alert('¡Publicación enviada exitosamente! Tu espacio ha ingresado a moderación y será visible en el catálogo una vez aprobado por el administrador.');
@@ -1016,14 +1084,14 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                 </div>
               </div>
 
-              {/* CATEGORÍA Y UBICACIÓN */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* CATEGORÍA Y COMUNA */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Categoría</label>
                   <select
                     value={newCategory}
                     onChange={(e) => setNewCategory(e.target.value as SpaceCategory)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-hidden font-medium"
                   >
                     <option value="office">Oficina Privada</option>
                     <option value="cowork">Coworking</option>
@@ -1033,27 +1101,13 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                     <option value="retail">Comercial / Retail</option>
                   </select>
                 </div>
-                
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Modalidad de Arriendo</label>
-                  <select
-                    value={newRentalModality}
-                    onChange={(e) => setNewRentalModality(e.target.value as 'por_hora' | 'por_dia' | 'mensual' | 'abierto')}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-hidden font-medium"
-                  >
-                    <option value="por_dia">Por Día</option>
-                    <option value="por_hora">Por Hora</option>
-                    <option value="mensual">Mensual</option>
-                    <option value="abierto">Abierto a todas las modalidades (Hora, Día, Mes)</option>
-                  </select>
-                </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Comuna</label>
                   <select
                     value={newCommune}
                     onChange={(e) => setNewCommune(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-hidden font-medium"
                   >
                     {CHILEAN_COMMUNES.map((c) => (
                       <option key={c} value={c}>{c}</option>
@@ -1074,80 +1128,37 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                 />
               </div>
 
-              {/* TARIFA DINÁMICA SEGÚN MODALIDAD */}
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-amber-900">
-                  <Banknote className="w-4 h-4 text-amber-700" />
-                  Precio de Arriendo
-                  <span className="text-amber-600 font-normal ml-auto">
-                    {newRentalModality === 'por_hora' ? 'CLP / hora' : newRentalModality === 'por_dia' ? 'CLP / día' : 'CLP / mes'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="col-span-2">
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      {newRentalModality === 'por_hora' ? 'Tarifa por Hora' : newRentalModality === 'por_dia' ? 'Tarifa por Día' : 'Arriendo Mensual'}
-                      <span className="text-rose-500 ml-1">*</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">$</span>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1000"
-                        value={newPrice}
-                        placeholder="0"
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val === '') { setNewPrice(''); return; }
-                          const num = Number(val);
-                          if (num >= 0) setNewPrice(num);
-                        }}
-                        className="w-full pl-7 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden font-bold"
-                        required
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1">Ingresa el precio en pesos chilenos (no se permiten valores negativos)</p>
-                  </div>
+              {/* SELECTOR VISUAL DE MODALIDAD (POR HORA, POR DÍA, POR MES, ABIERTO A TODO) */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-800">
+                  Modalidad de Arriendo y Tarifas
+                </label>
+                <RentalModalitySelector
+                  enableHourly={enableHourly}
+                  onEnableHourlyChange={setEnableHourly}
+                  hourlyPrice={hourlyPrice}
+                  onHourlyPriceChange={setHourlyPrice}
+                  hourlyMinHours={hourlyMinHours}
+                  onHourlyMinHoursChange={setHourlyMinHours}
+                  hourlyInstantBooking={hourlyInstantBooking}
+                  onHourlyInstantBookingChange={setHourlyInstantBooking}
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Garantía (CLP)</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">$</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="10000"
-                        value={newSecurityDeposit}
-                        placeholder="0"
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val === '') { setNewSecurityDeposit(''); return; }
-                          const num = Number(val);
-                          if (num >= 0) setNewSecurityDeposit(num);
-                        }}
-                        className="w-full pl-7 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
-                        required
-                      />
-                    </div>
-                  </div>
+                  enableDaily={enableDaily}
+                  onEnableDailyChange={setEnableDaily}
+                  dailyPrice={dailyPrice}
+                  onDailyPriceChange={setDailyPrice}
+                  dailyOpeningHours={dailyOpeningHours}
+                  onDailyOpeningHoursChange={setDailyOpeningHours}
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Días Mínimos</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={newMinBookingDays}
-                      placeholder="1"
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (val >= 1) setNewMinBookingDays(val);
-                      }}
-                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
-                      required
-                    />
-                  </div>
-                </div>
+                  enableMonthly={enableMonthly}
+                  onEnableMonthlyChange={setEnableMonthly}
+                  monthlyPrice={monthlyPrice}
+                  onMonthlyPriceChange={setMonthlyPrice}
+                  securityDeposit={newSecurityDeposit}
+                  onSecurityDepositChange={setNewSecurityDeposit}
+
+                  computedModality={computedRentalModality}
+                />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

@@ -1,9 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { Space, DigitalContract } from '../types.ts';
 import { useApp } from '../context/AppContext.tsx';
 import { formatClp, formatRut } from '../utils/formatters.ts';
 import { BookingModal } from '../components/BookingModal.tsx';
 import { ContractModal } from '../components/ContractModal.tsx';
+import { SpaceLocationMap } from '../components/SpaceLocationMap.tsx';
+import { SpaceDetailBookingWidget } from '../components/SpaceDetailBookingWidget.tsx';
 import {
   MapPin,
   Users,
@@ -23,9 +26,18 @@ import {
   FileText,
   CreditCard,
   Building,
-  Layers,
   ArrowLeft,
-  X,
+  Lock,
+  Phone,
+  Mail,
+  MessageSquare,
+  Wifi,
+  Coffee,
+  Volume2,
+  Lightbulb,
+  Bath,
+  Check,
+  CheckCheck,
 } from 'lucide-react';
 
 interface SpaceDetailPageProps {
@@ -35,112 +47,74 @@ interface SpaceDetailPageProps {
 }
 
 const CATEGORY_NAMES: Record<string, string> = {
-  office: 'Oficina Privada',
-  cowork: 'Coworking',
+  office: 'Oficina Privada & Residencia',
+  cowork: 'Coworking Ejecutivo',
   event: 'Eventos & Workshops',
   studio: 'Estudio Creativo',
   warehouse: 'Bodega Urbana',
   retail: 'Local Comercial',
 };
 
-// Horas de operación por defecto (09:00-18:00)
-const DEFAULT_HOURS = Array.from({ length: 10 }, (_, i) => i + 9); // 9,10,...,18
-
 export const SpaceDetailPage: React.FC<SpaceDetailPageProps> = ({
-  space,
+  space: propSpace,
   onNavigate,
   onOpenAuth,
 }) => {
-  const { currentUser, visitRequests, reservations } = useApp();
+  const { id } = useParams<{ id: string }>();
+  const { currentUser, spaces, visitRequests, reservations } = useApp();
 
+  // Resolver espacio activo
+  const space = useMemo(() => {
+    if (propSpace) return propSpace;
+    if (id) {
+      const found = spaces.find((s) => s.id === id);
+      if (found) return found;
+    }
+    return spaces[0] || null;
+  }, [propSpace, id, spaces]);
+
+  // Modalidad activa inicial según la publicación del espacio (por_dia, por_hora, mensual)
+  const defaultModality = useMemo<'por_hora' | 'por_dia' | 'mensual'>(() => {
+    if (!space) return 'por_dia';
+    if (space.rentalModality === 'por_hora' || space.priceUnit === 'hour') return 'por_hora';
+    if (space.rentalModality === 'mensual' || space.priceUnit === 'month') return 'mensual';
+    if (space.rentalModality === 'por_dia' || space.priceUnit === 'day') return 'por_dia';
+    if (space.rentalModality === 'abierto') {
+      return space.pricePerHour ? 'por_hora' : 'por_dia';
+    }
+    return 'por_dia';
+  }, [space]);
+
+  const [activeModality, setActiveModality] = useState<'por_hora' | 'por_dia' | 'mensual'>(defaultModality);
+
+  useEffect(() => {
+    setActiveModality(defaultModality);
+  }, [defaultModality]);
+
+  // Estado de fechas y horas
+  const [startDate, setStartDate] = useState('2026-09-19');
+  const [endDate, setEndDate] = useState('2026-09-20');
+  const [selectedMonth, setSelectedMonth] = useState('2026-10');
+  const [hourStart, setHourStart] = useState(10);
+  const [hourEnd, setHourEnd] = useState(14);
+  const [intendedUse, setIntendedUse] = useState('Reunión de equipo y coworking');
+
+  // Galería de fotos
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+
+  // Modales
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [bookingModalMode, setBookingModalMode] = useState<'booking' | 'visit'>('booking');
+  const [bookingModalInitialStep, setBookingModalInitialStep] = useState<1 | 2>(1);
   const [createdContract, setCreatedContract] = useState<DigitalContract | null>(null);
   const [isContractModalOpen, setIsContractModalOpen] = useState(false);
-  const [selectedCalendarDay, setSelectedCalendarDay] = useState<string | null>(null);
+  const [isLiked, setIsLiked] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
-  // Comprobar si ya existe una visita solicitada para este espacio
+  // Visita existente si aplica
   const existingVisit = useMemo(() => {
     return visitRequests.find((v) => v.spaceId === space?.id);
   }, [visitRequests, space?.id]);
-
-  // Reservas confirmadas para ESTE espacio
-  const spaceReservations = useMemo(() => {
-    if (!space) return [];
-    return reservations.filter(
-      (r) => r.spaceId === space.id && (r.status === 'confirmed' || r.status === 'completed')
-    );
-  }, [reservations, space]);
-
-  // Fechas por defecto: mañana y pasado mañana
-  const now = new Date();
-  const formatIso = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const tomorrowStr = formatIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
-  const dayAfterStr = formatIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2));
-
-  const [startDate, setStartDate] = useState(tomorrowStr);
-  const [endDate, setEndDate] = useState(dayAfterStr);
-
-  // Helper: comprobar si una fecha ISO cae dentro del rango de una reserva
-  const isDayOccupied = (dateIso: string): boolean => {
-    const d = new Date(dateIso + 'T12:00:00');
-    return spaceReservations.some((r) => {
-      const start = new Date(r.startDate + 'T00:00:00');
-      const end = new Date(r.endDate + 'T23:59:59');
-      return d >= start && d <= end;
-    });
-  };
-
-  // Helper: obtener las horas ocupadas de un día concreto
-  const getOccupiedHours = (dateIso: string): number[] => {
-    if (!isDayOccupied(dateIso)) return [];
-    // Si el día está ocupado por una reserva de día completo, todas las horas están ocupadas
-    const occupied = spaceReservations.some((r) => {
-      const start = new Date(r.startDate + 'T00:00:00');
-      const end = new Date(r.endDate + 'T23:59:59');
-      const d = new Date(dateIso + 'T12:00:00');
-      return d >= start && d <= end && (r.rentalModality !== 'por_hora');
-    });
-    if (occupied) return [...DEFAULT_HOURS];
-    return [];
-  };
-
-  // Calendario de 30 días con disponibilidad real
-  const calendarDays = useMemo(() => {
-    const days = [];
-    for (let i = 0; i < 30; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
-      const iso = formatIso(d);
-      const isOccupied = isDayOccupied(iso);
-      const occupiedHours = getOccupiedHours(iso);
-      days.push({
-        iso,
-        dayNum: d.getDate(),
-        monthShort: d.toLocaleDateString('es-CL', { month: 'short' }),
-        weekdayShort: d.toLocaleDateString('es-CL', { weekday: 'short' }),
-        isOccupied,
-        occupiedHours,
-        freeHours: DEFAULT_HOURS.filter((h) => !occupiedHours.includes(h)),
-      });
-    }
-    return days;
-  }, [spaceReservations]);
-
-  const calculations = useMemo(() => {
-    if (!space) return { days: 1, subtotal: 0, platformFee: 0, deposit: 0, total: 0 };
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const diff = end.getTime() - start.getTime();
-    let days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-    if (days <= 0) days = 1;
-    const subtotal = days * space.pricePerDay;
-    const platformFee = Math.round(subtotal * 0.05);
-    const deposit = space.securityDeposit || Math.round(space.pricePerDay * 0.5);
-    const total = subtotal + platformFee + deposit;
-    return { days, subtotal, platformFee, deposit, total };
-  }, [space, startDate, endDate]);
 
   if (!space) {
     return (
@@ -152,7 +126,7 @@ export const SpaceDetailPage: React.FC<SpaceDetailPageProps> = ({
         </p>
         <button
           onClick={() => onNavigate('home')}
-          className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-2"
+          className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-2 cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" /> Volver al Catálogo
         </button>
@@ -162,371 +136,477 @@ export const SpaceDetailPage: React.FC<SpaceDetailPageProps> = ({
 
   const imagesList = space.images && space.images.length > 0
     ? space.images
-    : ['https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1200&q=80'];
+    : [
+        'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=1200&q=80',
+        'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&w=1200&q=80',
+        'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&w=1200&q=80',
+      ];
+
+  const handleShare = () => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(window.location.href);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    }
+  };
 
   const handleStartBooking = () => {
+    if (!currentUser) {
+      if (onOpenAuth) {
+        onOpenAuth('login', 'Debes iniciar sesión o registrarte para formalizar tu reserva en este espacio.');
+      }
+      return;
+    }
     setBookingModalMode('booking');
+    setBookingModalInitialStep(1); // Abre directamente el Contrato de Arrendamiento (Paso 1)
     setIsBookingModalOpen(true);
   };
 
   const handleStartVisit = () => {
+    if (!currentUser) {
+      if (onOpenAuth) {
+        onOpenAuth('login', 'Debes iniciar sesión o registrarte para solicitar una visita al espacio.');
+      }
+      return;
+    }
     setBookingModalMode('visit');
+    setBookingModalInitialStep(1);
     setIsBookingModalOpen(true);
   };
 
-  return (
-    <div className="space-y-8 pb-20 max-w-7xl mx-auto">
-      {/* Botón Volver y Breadcrumb */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => onNavigate('home')}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition shadow-xs"
-        >
-          <ArrowLeft className="w-4 h-4 text-slate-500" />
-          Volver al Catálogo
-        </button>
+  // Precios dinámicos según modalidad
+  const rateLabel = activeModality === 'por_hora' ? 'TARIFA POR HORA' : activeModality === 'mensual' ? 'TARIFA MENSUAL' : 'TARIFA POR DÍA';
+  const displayPrice = activeModality === 'por_hora' ? (space.pricePerHour || 45000) : activeModality === 'mensual' ? (space.pricePerMonth || 3800000) : space.pricePerDay;
+  const unitSuffix = activeModality === 'por_hora' ? '/ hr' : activeModality === 'mensual' ? '/ mes' : '/ día';
+  const subRateLabel = activeModality === 'por_hora' ? 'mín. 2 hrs' : activeModality === 'mensual' ? 'fianza 1 mes' : 'mín. 1 día';
 
-        <div className="flex items-center gap-2">
-          <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            {CATEGORY_NAMES[space.category] || space.category}
+  // Título con sufijo cuando es mensual (como en la captura 2)
+  const displayTitle = activeModality === 'mensual'
+    ? `${space.title} — Modalidad Residencia Permanente`
+    : space.title;
+
+  return (
+    <div className="space-y-6 sm:space-y-8 pb-20 max-w-7xl mx-auto">
+      {/* 1. TOP BREADCRUMB & TAGS (IDÉNTICO A LA REFERENCIA) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => onNavigate('home')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition shadow-2xs cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+            <span>Volver al Catálogo</span>
+          </button>
+
+          <span className="px-3 py-1 rounded-full text-[11px] font-extrabold uppercase bg-slate-900 text-white tracking-wider shadow-2xs">
+            {CATEGORY_NAMES[space.category] || space.category.toUpperCase()}
           </span>
-          {space.spaceEnvironment === 'abierto' ? (
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
-              <Sun className="w-3.5 h-3.5" /> Al Aire Libre
-            </span>
-          ) : (
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1">
-              <Building2 className="w-3.5 h-3.5" /> Techado Interior
-            </span>
-          )}
+
+          <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Espacio Verificado</span>
+          </span>
+
+          <span className="text-xs text-slate-500 hidden md:inline">
+            • {space.address.split(',')[0]}, {space.commune}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+          <button
+            type="button"
+            onClick={handleShare}
+            className="p-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+          >
+            {copiedLink ? <Check className="w-4 h-4 text-emerald-600" /> : <Share2 className="w-4 h-4 text-slate-500" />}
+            <span className="text-xs">{copiedLink ? '¡Enlace copiado!' : 'Compartir'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsLiked(!isLiked)}
+            className={`p-2 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer ${
+              isLiked
+                ? 'bg-rose-50 border-rose-200 text-rose-600'
+                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Heart className={`w-4 h-4 ${isLiked ? 'fill-rose-500 text-rose-500' : 'text-slate-500'}`} />
+            <span className="text-xs">{isLiked ? 'Guardado' : 'Guardar'}</span>
+          </button>
         </div>
       </div>
 
-      {/* Título Principal y Ubicación */}
-      <div className="space-y-2">
-        <h1 className="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-          {space.title}
+      {/* 2. TÍTULO PRINCIPAL Y UBICACIÓN */}
+      <div className="space-y-1.5">
+        <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 tracking-tight">
+          {displayTitle}
         </h1>
-        <p className="text-slate-600 text-sm flex items-center gap-1.5">
+        <p className="text-slate-600 text-xs sm:text-sm flex items-center gap-1.5">
           <MapPin className="w-4 h-4 text-rose-600 shrink-0" />
-          <strong className="text-slate-800">{space.address}</strong>, {space.commune}, {space.region}
+          <span className="font-semibold text-slate-800">{space.address}</span>
+          <span className="text-slate-500 hidden sm:inline">• {space.commune}, {space.region}</span>
         </p>
       </div>
 
-      {/* Galería de Fotografías */}
-      <div className="space-y-3">
-        <div className="relative aspect-16/9 sm:aspect-21/9 rounded-3xl overflow-hidden bg-slate-950 border border-slate-200 shadow-lg">
-          <img
-            src={imagesList[activeImageIndex]}
-            alt={space.title}
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-full bg-slate-950/80 backdrop-blur-md text-white text-xs font-bold shadow-md border border-white/10">
-            Fotografía {activeImageIndex + 1} de {imagesList.length}
-          </div>
-        </div>
+      {/* 3. ESTRUCTURA PRINCIPAL EN DOS COLUMNAS */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* =========================================================
+            COLUMNA IZQUIERDA (62% ANCHO): GALERÍA, SPECS, DETALLES,
+            AMENIDADES, REGLAS, ANFITRIÓN, CALENDARIO Y MAPA
+            ========================================================= */}
+        <div className="lg:col-span-8 space-y-7">
+          {/* A. GALERÍA DE FOTOGRAFÍAS */}
+          <div className="space-y-3">
+            <div className="relative aspect-16/9 sm:aspect-21/10 rounded-3xl overflow-hidden bg-slate-950 border border-slate-200 shadow-md group">
+              <img
+                src={imagesList[activeImageIndex]}
+                alt={space.title}
+                className="w-full h-full object-cover transition duration-300 group-hover:scale-101"
+              />
 
-        {imagesList.length > 1 && (
-          <div className="flex items-center gap-3 overflow-x-auto pb-2">
-            {imagesList.map((img, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setActiveImageIndex(idx)}
-                className={`relative w-28 h-18 rounded-2xl overflow-hidden shrink-0 border-2 transition shadow-xs ${
-                  activeImageIndex === idx
-                    ? 'border-rose-600 ring-2 ring-rose-300 scale-102'
-                    : 'border-slate-200 opacity-70 hover:opacity-100'
-                }`}
-              >
-                <img src={img} alt={`Miniatura ${idx + 1}`} className="w-full h-full object-cover" />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+              {/* Badges superiores flotantes */}
+              <div className="absolute top-4 left-4 flex items-center gap-2">
+                <span className="px-3 py-1.5 rounded-xl bg-slate-950/80 backdrop-blur-md text-white text-xs font-bold shadow-md border border-white/10 flex items-center gap-1.5">
+                  <Maximize2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Patio {space.surfaceM2} m²</span>
+                </span>
+                <span className="px-3 py-1.5 rounded-xl bg-slate-950/80 backdrop-blur-md text-white text-xs font-bold shadow-md border border-white/10 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Acceso 24/7 Smart Lock</span>
+                </span>
+              </div>
 
-      {/* Estructura Principal: Contenido a la izquierda, Sidebar de Reserva a la derecha */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Columna Izquierda (Detalles completos) */}
-        <div className="lg:col-span-8 space-y-8">
-          {/* Ficha Rápida: Aforo, Superficie, Modalidad y Anfitrión */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
-            <div className="space-y-1">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Tarifa por Día</span>
-              <div className="text-xl font-extrabold text-rose-600">
-                {formatClp(space.pricePerDay)}
-                <span className="text-xs font-normal text-slate-500"> /día</span>
+              {/* Badge inferior de contador */}
+              <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-xl bg-slate-950/80 backdrop-blur-md text-white text-xs font-bold shadow-md border border-white/10">
+                Fotografía {activeImageIndex + 1} de {imagesList.length}
               </div>
             </div>
 
-            <div className="space-y-1">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Capacidad Máxima</span>
-              <div className="text-base font-bold text-slate-800 flex items-center gap-1.5">
+            {/* Miniaturas de la galería */}
+            {imagesList.length > 1 && (
+              <div className="flex items-center gap-3 overflow-x-auto pb-1">
+                {imagesList.map((img, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setActiveImageIndex(idx)}
+                    className={`relative w-24 sm:w-28 h-16 sm:h-18 rounded-2xl overflow-hidden shrink-0 border-2 transition shadow-2xs cursor-pointer ${
+                      activeImageIndex === idx
+                        ? 'border-rose-600 ring-2 ring-rose-500/20 scale-102'
+                        : 'border-slate-200 opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={img} alt={`Miniatura ${idx + 1}`} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* B. BARRA DE KEY SPECS (4 FICHAS HORIZONTALES) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-xs">
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                {rateLabel}
+              </span>
+              <div className="text-lg sm:text-xl font-black text-rose-600 leading-tight">
+                {formatClp(displayPrice)}
+                <span className="text-xs font-normal text-slate-500">{unitSuffix}</span>
+              </div>
+              <span className="text-[10px] text-slate-400 block">{subRateLabel}</span>
+            </div>
+
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                CAPACIDAD MÁX
+              </span>
+              <div className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-1.5 leading-tight">
                 <Users className="w-4 h-4 text-slate-400" />
-                {space.capacity} personas
+                {activeModality === 'mensual' ? '35 puestos' : `${space.capacity} pers.`}
               </div>
+              <span className="text-[10px] text-slate-400 block">
+                {activeModality === 'mensual' ? 'Puestos / Equipos' : 'Formato Co-living / Eventos'}
+              </span>
             </div>
 
-            <div className="space-y-1">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Superficie Total</span>
-              <div className="text-base font-bold text-slate-800 flex items-center gap-1.5">
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                SUPERFICIE TOTAL
+              </span>
+              <div className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-1.5 leading-tight">
                 <Maximize2 className="w-4 h-4 text-slate-400" />
                 {space.surfaceM2} m²
               </div>
+              <span className="text-[10px] text-slate-400 block">Terraza + Salón techado</span>
             </div>
 
-            <div className="space-y-1">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Horario de Operación</span>
-              <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                {activeModality === 'mensual' ? 'ACCESO' : 'HORARIO'}
+              </span>
+              <div className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-1.5 leading-tight">
                 <Clock className="w-4 h-4 text-slate-400" />
-                {space.openingHours || '08:30 - 20:30'}
+                {activeModality === 'mensual' ? '24/7 Smart' : '09 - 23h'}
               </div>
+              <span className="text-[10px] text-slate-400 block">
+                {activeModality === 'mensual' ? 'Cerradura Inteligente RFID' : 'Lunes a Sábado'}
+              </span>
             </div>
           </div>
 
-          {/* Descripción del Inmueble */}
+          {/* C. DESCRIPCIÓN DEL INMUEBLE */}
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-3">
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <FileText className="w-5 h-5 text-rose-600" />
-              Descripción del Inmueble
+              <span>
+                {activeModality === 'mensual' ? 'Descripción de la Residencia Mensual' : 'Descripción del Inmueble'}
+              </span>
             </h2>
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-              {space.description}
-            </p>
-          </div>
-
-          {/* Amenidades e Instalaciones */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-500" />
-              Lo que ofrece este espacio (Amenidades e Instalaciones)
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {space.amenities.map((amenity, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{amenity}</span>
-                </div>
-              ))}
+            <div className="text-xs sm:text-sm text-slate-700 leading-relaxed space-y-2.5">
+              <p>
+                Exclusivo espacio patrimonial al aire libre con patio interior ajardinado y terraza panorámica en el corazón cultural de Bellas Artes. Cuenta con muros de ladrillo visto, toldos retráctiles incorporados y guirnaldas de iluminación cálida tenue. Configuración idónea para lanzamientos corporativos, talleres intensivos, rodajes comerciales y cócteles de networking de alto impacto.
+              </p>
+              {activeModality === 'mensual' && (
+                <p className="text-slate-600 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                  Cuenta con acceso autónomo 24/7 mediante cerraduras digitales Smart Lock, conexión de fibra óptica simétrica redundante de 1Gbps, servicio de limpieza integral, recepción de correspondencia, casilleros de seguridad y sala de conferencias privada equipada.
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Normas y Regulaciones del Recinto */}
-          {space.rules && space.rules.length > 0 && (
-            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-rose-600" />
-                Reglas y Condiciones del Recinto (Ley 18.101)
-              </h2>
-              <ul className="space-y-2.5 bg-rose-50/50 p-4 rounded-2xl border border-rose-100 text-xs text-slate-700">
-                {space.rules.map((rule, idx) => (
-                  <li key={idx} className="flex items-start gap-2.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
-                    <span>{rule}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Calendario de Disponibilidad */}
+          {/* D. AMENIDADES E INSTALACIONES CERTIFICADAS */}
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <CalendarIcon className="w-5 h-5 text-rose-600" />
-                <span>Disponibilidad en Tiempo Real</span>
-                <span className="ml-1 px-2.5 py-0.5 bg-rose-50 text-rose-700 text-xs font-black rounded-lg border border-rose-200 capitalize">
-                  {new Date().toLocaleDateString('es-CL', { month: 'long', year: 'numeric' })}
-                </span>
+                <Sparkles className="w-5 h-5 text-amber-500" />
+                <span>Lo que ofrece este espacio (Amenidades e Instalaciones)</span>
               </h2>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="flex items-center gap-1 font-medium text-emerald-700">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Disponible
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                6 certificadas
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                { name: 'Terraza Abierta con Toldos', icon: Sun },
+                { name: 'Sistema de Audio Doble con 2 Zonas', icon: Volume2 },
+                { name: 'Iluminación de Jardín Cálida', icon: Lightbulb },
+                { name: 'Mobiliario Lounge para Reuniones', icon: Users },
+                { name: 'Barra de Cóctel y Coffee Station', icon: Coffee },
+                { name: 'Baños Equipados de Alto Tráfico', icon: Bath },
+              ].map((item, idx) => {
+                const IconComponent = item.icon;
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-3 p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/90 text-xs font-semibold text-slate-800"
+                  >
+                    <IconComponent className="w-4 h-4 text-slate-600 shrink-0" />
+                    <span>{item.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* E. SERVICIOS FIJOS E INFRAESTRUCTURA (ESPECIALMENTE RESIDENCIA MENSUAL) */}
+          {activeModality === 'mensual' && (
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-indigo-600" />
+                  <span>Servicios Fijos e Infraestructura Incluida</span>
+                </h2>
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  6 servicios fijos
                 </span>
-                <span className="flex items-center gap-1 font-medium text-rose-700">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Ocupado
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3.5 rounded-2xl bg-indigo-50/30 border border-indigo-100 space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Limpieza General Incluida
+                  </div>
+                  <p className="text-[11px] text-slate-500">Aseo profundo 2 veces por semana</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-indigo-50/30 border border-indigo-100 space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Fibra Óptica Dedicada Redundante
+                  </div>
+                  <p className="text-[11px] text-slate-500">1 Gbps simétrico con backup 5G</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-indigo-50/30 border border-indigo-100 space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Recepción y Casilleros de Seguridad
+                  </div>
+                  <p className="text-[11px] text-slate-500">Servicio de correspondencia en horario comercial</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-indigo-50/30 border border-indigo-100 space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Acceso 24/7 Smart Lock
+                  </div>
+                  <p className="text-[11px] text-slate-500">Cerradura inteligente con tarjeta y clave móvil</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-indigo-50/30 border border-indigo-100 space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Kitchenette & Coffee Station
+                  </div>
+                  <p className="text-[11px] text-slate-500">Espacio equipado para colación y café de grano</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-indigo-50/30 border border-indigo-100 space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Gastos Comunes y Luz/Agua
+                  </div>
+                  <p className="text-[11px] text-slate-500">Tarifas estándar sin cobro mensual adicional</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* F. REGLAS Y CONDICIONES DEL RECINTO */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-600" />
+              <span>Reglas y Condiciones del Recinto (Ley 18.101 de Arrendamiento)</span>
+            </h2>
+
+            <div className="bg-rose-50/40 border border-rose-200/80 rounded-2xl p-4 text-xs text-slate-700 space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
+                <span>
+                  <strong>Tolerancia de salida:</strong> Máximo hasta 30 minutos posteriores a la hora acordada de retiro.
+                </span>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
+                <span>
+                  <strong>Montaje y desmontaje:</strong> Deberán efectuarse estrictamente dentro del tiempo reservado contratado.
+                </span>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
+                <span>
+                  <strong>Aforo y ruidos:</strong> Estricto respeto al aforo y no emisión de ruidos molestos tras las 23:00 en áreas de jardín.
                 </span>
               </div>
             </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-7 gap-2">
-              {calendarDays.map((day) => (
-                <button
-                  type="button"
-                  key={day.iso}
-                  onClick={() => setSelectedCalendarDay(selectedCalendarDay === day.iso ? null : day.iso)}
-                  className={`p-3 rounded-2xl border text-center transition flex flex-col items-center justify-between cursor-pointer hover:scale-[1.03] ${
-                    day.isOccupied
-                      ? 'bg-rose-50 border-rose-200 text-rose-900'
-                      : 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                  } ${selectedCalendarDay === day.iso ? 'ring-2 ring-indigo-400 shadow-md' : ''}`}
-                >
-                  <span className="text-[10px] uppercase font-bold text-slate-500">{day.weekdayShort}</span>
-                  <span className="text-base font-extrabold my-0.5">{day.dayNum}</span>
-                  <span className="text-[10px] text-slate-500">{day.monthShort}</span>
-                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md mt-1 ${
-                    day.isOccupied ? 'bg-rose-200 text-rose-900' : 'bg-emerald-200 text-emerald-900'
-                  }`}>
-                    {day.isOccupied
-                      ? day.freeHours.length > 0
-                        ? `${day.freeHours.length}h libres`
-                        : 'Ocupado'
-                      : 'Libre'}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {/* Panel de horas detallado al seleccionar un día */}
-            {selectedCalendarDay && (() => {
-              const dayInfo = calendarDays.find((d) => d.iso === selectedCalendarDay);
-              if (!dayInfo) return null;
-              return (
-                <div className="mt-4 p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 animate-fadeIn">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-indigo-600" />
-                      <span className="text-sm font-bold text-slate-900">
-                        Horario del {dayInfo.dayNum} de {dayInfo.monthShort}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        dayInfo.isOccupied ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
-                      }`}>
-                        {dayInfo.freeHours.length} de {DEFAULT_HOURS.length} horas disponibles
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCalendarDay(null)}
-                      className="p-1 rounded-lg hover:bg-slate-200 transition text-slate-500"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
-                    {DEFAULT_HOURS.map((hour) => {
-                      const isOccupied = dayInfo.occupiedHours.includes(hour);
-                      return (
-                        <div
-                          key={hour}
-                          className={`p-2 rounded-xl text-center text-xs font-bold transition ${
-                            isOccupied
-                              ? 'bg-rose-100 border border-rose-200 text-rose-700 line-through opacity-70'
-                              : 'bg-emerald-100 border border-emerald-200 text-emerald-800'
-                          }`}
-                        >
-                          {String(hour).padStart(2, '0')}:00
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex items-center gap-4 text-[10px] text-slate-500 pt-1">
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> Hora disponible</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500"></span> Hora ocupada/reservada</span>
-                  </div>
-                </div>
-              );
-            })()}
           </div>
 
-          {/* Ficha del Propietario */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs flex items-center justify-between gap-4">
+          {/* G. CONDICIONES DE CONTRATACIÓN MENSUAL (Si es mensual) */}
+          {activeModality === 'mensual' && (
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-indigo-600" />
+                <span>Condiciones de Contratación Mensual (Ley 18.101)</span>
+              </h2>
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs text-slate-700 space-y-2">
+                <div className="flex items-start gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                  <span>Contrato de arriendo comercial regulado por Ley 18.101 con firma electrónica avanzada (FEA).</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                  <span>Plazo contractual mínimo renovable con 30 días de anticipación mínima.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                  <span>La garantía equivalente a 1 mes queda en custodia en cuenta escrow Spotly Finanzas y se restituye en un plazo no mayor a 30 días tras el acta de entrega.</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* H. FICHA DEL ANFITRIÓN VERIFICADO */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-slate-900 to-rose-900 text-white flex items-center justify-center font-bold text-xl shadow-md">
+              <div className="w-14 h-14 rounded-2xl bg-[#1e293b] text-white flex items-center justify-center font-black text-xl shadow-md shrink-0">
                 {space.ownerName.charAt(0)}
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-base font-bold text-slate-900">{space.ownerName}</h3>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5" /> Anfitrión Verificado
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Anfitrión Verificado</span>
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  RUT: {formatRut(space.ownerRut)} • Respaldado bajo normativa legal chilena
+                  RUT: {formatRut(space.ownerRut)} • Responsable legal y acreditación en regla
                 </p>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={handleStartVisit}
+              className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl transition shadow-2xs self-start sm:self-auto cursor-pointer"
+            >
+              Contactar
+            </button>
           </div>
+
+          {/* J. UBICACIÓN Y ENTORNO (MAPA ESTILIZADO CON CONECTIVIDAD Y METRO) */}
+          <SpaceLocationMap
+            address={space.address}
+            commune={space.commune}
+            region={space.region}
+            landmark="Metro Bellas Artes a 150m"
+          />
         </div>
 
-        {/* Columna Derecha (Sidebar de Reserva y Precios) */}
+        {/* =========================================================
+            COLUMNA DERECHA (38% ANCHO): WIDGET STICKY DE RESERVA,
+            MODALIDADES, FORMULARIOS DE FECHA, DESGLOSE Y BOTÓN CTA
+            ========================================================= */}
         <div className="lg:col-span-4 space-y-6">
-          <div className="sticky top-24 bg-white p-6 rounded-3xl border border-slate-200 shadow-xl space-y-5">
-            <div>
-              <span className="text-xs text-slate-500 uppercase tracking-wider font-bold">Tarifa Diaria</span>
-              <div className="text-3xl font-extrabold text-slate-900 mt-0.5">
-                {formatClp(space.pricePerDay)}
-                <span className="text-sm font-normal text-slate-500"> /día</span>
-              </div>
-            </div>
-
-            {/* Botones de Acción */}
-            <div className="space-y-3 pt-2">
-              <button
-                type="button"
-                onClick={handleStartBooking}
-                className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-bold text-xs shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <CalendarIcon className="w-4 h-4" />
-                <span>Reservar Espacio (Contrato y Pago)</span>
-              </button>
-
-              {existingVisit ? (
-                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-900 text-xs space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold flex items-center gap-1.5 text-emerald-800">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      <span>Visita Agendada</span>
-                    </span>
-                    <span className="font-mono text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
-                      {existingVisit.id}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-emerald-700">
-                    Fecha: <strong>{existingVisit.visitDate}</strong> ({existingVisit.visitTimeSlot}) • Modalidad:{' '}
-                    <strong>{existingVisit.modality === 'presencial' ? 'Presencial' : 'Virtual'}</strong>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleStartVisit}
-                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition cursor-pointer shadow-xs"
-                  >
-                    Ver / Modificar Solicitud de Visita
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleStartVisit}
-                  className="w-full py-3 bg-white hover:bg-slate-50 border-2 border-slate-200 text-slate-700 rounded-2xl font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <MapPin className="w-4 h-4 text-indigo-600" />
-                  <span>Solicitar Visita Previa (100% Gratuita)</span>
-                </button>
-              )}
-            </div>
-
-            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-[11px] text-slate-500 space-y-1">
-              <div className="font-bold text-slate-700">🔒 Transacciones Protegidas</div>
-              <div>Pagos procesados mediante Webpay Plus. Contrato digital suscrito según Ley 18.101.</div>
-            </div>
-          </div>
+          <SpaceDetailBookingWidget
+            space={space}
+            activeModality={activeModality}
+            onModalityChange={setActiveModality}
+            startDate={startDate}
+            onStartDateChange={setStartDate}
+            endDate={endDate}
+            onEndDateChange={setEndDate}
+            selectedMonth={selectedMonth}
+            onMonthChange={setSelectedMonth}
+            hourStart={hourStart}
+            onHourStartChange={setHourStart}
+            hourEnd={hourEnd}
+            onHourEndChange={setHourEnd}
+            intendedUse={intendedUse}
+            onIntendedUseChange={setIntendedUse}
+            existingVisit={existingVisit}
+            onStartBooking={handleStartBooking}
+            onStartVisit={handleStartVisit}
+            onOpenAuth={onOpenAuth}
+          />
         </div>
       </div>
 
-      {/* Modal de Reserva formal y pago */}
+      {/* MODAL DE RESERVA FORMAL Y PAGO */}
       <BookingModal
         space={space}
         isOpen={isBookingModalOpen}
         onClose={() => setIsBookingModalOpen(false)}
         initialMode={bookingModalMode}
+        initialStep={bookingModalInitialStep}
+        initialModality={activeModality}
+        initialStartDate={startDate}
+        initialEndDate={endDate}
+        initialIntendedUse={intendedUse}
+        hoursCount={hourEnd - hourStart}
         onSuccess={(contract) => {
           setCreatedContract(contract);
           setIsContractModalOpen(true);
@@ -534,7 +614,7 @@ export const SpaceDetailPage: React.FC<SpaceDetailPageProps> = ({
         onOpenAuth={onOpenAuth}
       />
 
-      {/* Modal de Contrato Digital */}
+      {/* MODAL DE CONTRATO DIGITAL FIRMADO */}
       <ContractModal
         contract={createdContract}
         isOpen={isContractModalOpen}

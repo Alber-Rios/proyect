@@ -83,16 +83,36 @@ export function formatDateCl(dateStr: string): string {
 
 export function getSpaceRateInfo(space: {
   priceUnit?: 'hour' | 'day' | 'month';
-  rentalModality?: 'por_hora' | 'por_dia' | 'mensual';
+  rentalModality?: 'por_hora' | 'por_dia' | 'mensual' | 'abierto';
   pricePerHour?: number;
   pricePerDay: number;
   pricePerMonth?: number;
 }): {
   amount: number;
-  unit: 'hora' | 'día' | 'mes';
+  unit: 'hora' | 'día' | 'mes' | 'flexible';
   unitLabel: string;
   formatted: string;
+  isFlexible?: boolean;
 } {
+  if (space.rentalModality === 'abierto') {
+    if (space.pricePerHour) {
+      return {
+        amount: space.pricePerHour,
+        unit: 'flexible',
+        unitLabel: '/ hr • Flexible',
+        formatted: `${formatClp(space.pricePerHour)} / hr`,
+        isFlexible: true,
+      };
+    }
+    return {
+      amount: space.pricePerDay,
+      unit: 'flexible',
+      unitLabel: '/ día • Flexible',
+      formatted: `${formatClp(space.pricePerDay)} / día`,
+      isFlexible: true,
+    };
+  }
+
   const modality = space.priceUnit || (space.rentalModality === 'por_hora' ? 'hour' : space.rentalModality === 'mensual' ? 'month' : 'day');
 
   if (modality === 'hour' && space.pricePerHour) {

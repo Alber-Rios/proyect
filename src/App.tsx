@@ -31,9 +31,9 @@ function AppContent() {
 
   const handleOpenAuth = (mode: 'login' | 'register', notice?: string) => {
     if (mode === 'login') {
-      navigate('/login');
+      navigate('/login', { state: { notice } });
     } else {
-      navigate('/register');
+      navigate('/register', { state: { notice } });
     }
   };
 

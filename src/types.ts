@@ -96,6 +96,8 @@ export interface Space {
   rating: number;
   reviewsCount: number;
   minBookingDays?: number;
+  minBookingHours?: number;
+  instantBooking?: boolean;
   createdAt: string;
 }
 
