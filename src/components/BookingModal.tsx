@@ -109,7 +109,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     initialStartDate && initialStartDate >= todayStr ? initialStartDate : todayStr
   );
   const [endDate, setEndDate] = useState(
-    initialEndDate && initialEndDate >= todayStr ? initialEndDate : tomorrowStr
+    initialEndDate && initialEndDate >= todayStr ? initialEndDate : (initialStartDate || todayStr)
   );
   const [bookingTimeSlots, setBookingTimeSlots] = useState<string[]>(initialTimeSlots || []);
   const [intendedUse, setIntendedUse] = useState(initialIntendedUse || 'Reunión de equipo y coworking');

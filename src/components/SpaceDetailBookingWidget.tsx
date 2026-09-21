@@ -300,7 +300,7 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
         return iso >= r.startDate && iso <= r.endDate;
       });
 
-      const isOccupied = hasReservation || (monthNum === 9 && (dayNum === 24 || dayNum === 27));
+      const isOccupied = hasReservation;
       const isPast = iso < todayIso;
       const isCheckIn = iso === startDate;
       const isCheckOut = iso === endDate;

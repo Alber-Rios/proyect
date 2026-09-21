@@ -95,7 +95,7 @@ export const SpaceDetailPage: React.FC<SpaceDetailPageProps> = ({
   const todayStr = useMemo(() => getTodayIso(), []);
   const tomorrowStr = useMemo(() => getOffsetDateIso(1), []);
   const [startDate, setStartDate] = useState(todayStr);
-  const [endDate, setEndDate] = useState(tomorrowStr);
+  const [endDate, setEndDate] = useState(todayStr); // Default to same day (1 day) as requested
   const [selectedMonth, setSelectedMonth] = useState('2026-10');
   const [hourStart, setHourStart] = useState(10);
   const [hourEnd, setHourEnd] = useState(14);

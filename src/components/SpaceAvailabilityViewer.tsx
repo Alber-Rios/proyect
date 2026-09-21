@@ -33,7 +33,7 @@ export const SpaceAvailabilityViewer: React.FC<SpaceAvailabilityViewerProps> = (
     const dayNum = d.getDate();
     const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const weekday = d.toLocaleDateString('es-CL', { weekday: 'short' });
-    const isOccupied = dayNum === 24 || dayNum === 27;
+    const isOccupied = false; // Se manejará dinámicamente con las reservas reales
     const isPast = iso < todayIso;
     const isCheckIn = iso === startDate;
     const isCheckOut = iso === endDate;
