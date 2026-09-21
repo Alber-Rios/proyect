@@ -37,6 +37,18 @@ function AppContent() {
     }
   };
 
+  const handleOpenOwnerUpgrade = () => {
+    if (!currentUser) {
+      handleOpenAuth('login', 'Inicia sesión para acceder a las funciones de propietario.');
+      return;
+    }
+    if (currentUser.role === 'owner' || currentUser.ownerTermsAccepted) {
+      navigate('/owner');
+      return;
+    }
+    setIsOwnerUpgradeModalOpen(true);
+  };
+
   const handleNavigate = (view: string) => {
     if (view === 'owner' && currentUser && currentUser.role === 'tenant' && !currentUser.ownerTermsAccepted) {
       setIsOwnerUpgradeModalOpen(true);
@@ -78,7 +90,7 @@ function AppContent() {
       <Header
         currentView={currentViewString as any}
         onNavigate={handleNavigate}
-        onOpenOwnerUpgrade={() => setIsOwnerUpgradeModalOpen(true)}
+        onOpenOwnerUpgrade={handleOpenOwnerUpgrade}
         onOpenAuth={handleOpenAuth}
       />
 
@@ -87,7 +99,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={
             <HomePage
-              onOpenOwnerUpgrade={() => setIsOwnerUpgradeModalOpen(true)}
+              onOpenOwnerUpgrade={handleOpenOwnerUpgrade}
               onNavigate={handleNavigate}
               onOpenAuth={handleOpenAuth}
               onSelectSpace={handleSelectSpace}
@@ -117,14 +129,14 @@ function AppContent() {
           <Route path="/my-bookings" element={
             <TenantReservationsPage
               onNavigate={handleNavigate}
-              onOpenOwnerUpgrade={() => setIsOwnerUpgradeModalOpen(true)}
+              onOpenOwnerUpgrade={handleOpenOwnerUpgrade}
               onOpenAuth={handleOpenAuth}
             />
           } />
 
           <Route path="/owner" element={
             <OwnerDashboardPage
-              onOpenOwnerUpgrade={() => setIsOwnerUpgradeModalOpen(true)}
+              onOpenOwnerUpgrade={handleOpenOwnerUpgrade}
               onOpenAuth={handleOpenAuth}
             />
           } />
@@ -141,7 +153,7 @@ function AppContent() {
           <Route path="/profile" element={
             <ProfilePage
               onNavigate={handleNavigate}
-              onOpenOwnerUpgrade={() => setIsOwnerUpgradeModalOpen(true)}
+              onOpenOwnerUpgrade={handleOpenOwnerUpgrade}
               onOpenAuth={handleOpenAuth}
             />
           } />

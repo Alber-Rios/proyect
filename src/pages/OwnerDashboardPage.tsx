@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext.tsx';
 import { formatClp, formatRut, getSpaceRateInfo, getTodayIso } from '../utils/formatters.ts';
 import { ContractModal } from '../components/ContractModal.tsx';
 import { RentalModalitySelector } from '../components/RentalModalitySelector.tsx';
+import { SpaceAvailabilityViewer } from '../components/SpaceAvailabilityViewer.tsx';
 import { generateDigitalContract } from '../utils/contractGenerator.ts';
 import {
   Building,
@@ -119,6 +120,7 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
   ]);
   const [contactModalTenant, setContactModalTenant] = useState<{ name: string; phone: string; email: string; spaceTitle: string } | null>(null);
   const [selectedDayInfo, setSelectedDayInfo] = useState<{ date: string; dayNumber: number } | null>(null);
+  const [ownerSelectedDate, setOwnerSelectedDate] = useState<string>(() => getTodayIso());
 
   // Formulario para nuevo espacio
   const [newTitle, setNewTitle] = useState('');
@@ -391,6 +393,18 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
     setSelectedAmenities([]);
     setSelectedRules([]);
     setNewImages([]);
+  };
+
+  const handleNavigateToBookingInCalendar = (booking: Reservation) => {
+    setSelectedSpaceId(booking.spaceId);
+    setOwnerSelectedDate(booking.startDate);
+    setActiveTab('calendar');
+    setTimeout(() => {
+      const el = document.getElementById('calendario-disponibilidad');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 80);
   };
 
   const handlePublishSpace = (e: React.FormEvent) => {
@@ -1276,8 +1290,8 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Columna Izquierda: Selector de Recinto, Navegación, Calendario Dinámico y Ficha (8 cols en desktop) */}
           <div className="lg:col-span-8 space-y-6">
-            <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-5 shadow-xs">
-              {/* Fila 1: Selector de Recinto y Modos de Vista */}
+            {/* Card de Gestión y Selector de Recinto */}
+            <div className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 space-y-4 shadow-xs">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -1305,252 +1319,57 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                   </div>
                 </div>
 
-                {/* Switcher de Vista: Mes / Semana / Lista */}
-                <div className="inline-flex items-center p-1 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 self-start sm:self-center">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
-                    onClick={() => setCalendarViewMode('month')}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                      calendarViewMode === 'month'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'hover:text-slate-900'
-                    }`}
-                  >
-                    Mes
-                  </button>
-                  <button
-                    onClick={() => setCalendarViewMode('week')}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                      calendarViewMode === 'week'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'hover:text-slate-900'
-                    }`}
-                  >
-                    Semana
-                  </button>
-                  <button
-                    onClick={() => setCalendarViewMode('list')}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                      calendarViewMode === 'list'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'hover:text-slate-900'
-                    }`}
-                  >
-                    Lista
-                  </button>
-                </div>
-              </div>
-
-              {/* Fila 2: Navegación de Mes + Bloqueo por Mantención */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handlePrevMonth}
-                    className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 transition cursor-pointer"
-                    title="Mes Anterior"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-base font-extrabold text-slate-900 capitalize px-1 min-w-[150px] text-center sm:text-left">
-                    {currentCalendarDate.toLocaleDateString('es-CL', { month: 'long', year: 'numeric' })}
-                  </span>
-                  <button
-                    onClick={handleNextMonth}
-                    className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 transition cursor-pointer"
-                    title="Mes Siguiente"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={handleResetToCurrentMonth}
-                    className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-600 transition cursor-pointer"
-                  >
-                    Hoy
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
+                    type="button"
                     onClick={() => setIsMaintenanceModalOpen(true)}
-                    className="px-3.5 py-1.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
                   >
                     <Wrench className="w-3.5 h-3.5 text-amber-600" />
-                    <span>+ Bloquear por Mantención</span>
+                    <span>+ Bloquear Mantención</span>
                   </button>
-                </div>
-              </div>
-
-              {/* Fila 3: Leyenda Dinámica */}
-              <div className="flex items-center gap-3 sm:gap-4 flex-wrap text-[11px] font-semibold text-slate-600 bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  <span className="font-bold text-slate-800">{spaceLegendRate}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                  <span>Ocupado / Confirmado</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                  <span>Solicitud Pendiente</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
-                  <span>Bloqueo Mantención</span>
-                </div>
-              </div>
-
-              {/* Fila 4: Días de la semana */}
-              <div className="grid grid-cols-7 gap-2 text-center text-xs font-extrabold text-slate-400 tracking-wider">
-                <div>Lun</div>
-                <div>Mar</div>
-                <div>Mié</div>
-                <div>Jue</div>
-                <div>Vie</div>
-                <div>Sáb</div>
-                <div>Dom</div>
-              </div>
-
-              {/* Fila 5: Cuadrícula del Calendario */}
-              <div className="grid grid-cols-7 gap-2">
-                {calendarGridDays.map((dayObj, index) => {
-                  if (!dayObj) {
-                    return (
-                      <div
-                        key={`empty-${index}`}
-                        className="h-24 rounded-2xl bg-slate-50/40 border border-transparent"
-                      />
-                    );
-                  }
-
-                  const { dayNumber, dateString } = dayObj;
-                  const { booking, visit, maintenance } = getDayEventsForSelectedSpace(dateString);
-                  const isMonthEnd = dateString === '2026-09-30';
-
-                  let cellBg = 'bg-white hover:border-slate-300 text-slate-800 border-slate-200';
-                  if (booking?.status === 'confirmed') {
-                    cellBg = 'bg-rose-50/90 border-rose-300 text-rose-950 font-bold';
-                  } else if (booking?.status === 'pending') {
-                    cellBg = 'bg-amber-50/90 border-amber-300 text-amber-950 font-bold';
-                  } else if (visit) {
-                    cellBg = 'bg-indigo-50/90 border-indigo-300 text-indigo-950 font-bold';
-                  } else if (maintenance) {
-                    cellBg = 'bg-slate-100 border-slate-300 text-slate-800';
-                  }
-
-                  return (
-                    <div
-                      key={dateString}
-                      onClick={() => setSelectedDayInfo({ date: dateString, dayNumber })}
-                      className={`min-h-[92px] sm:min-h-[100px] p-2 rounded-2xl border transition flex flex-col justify-between cursor-pointer hover:shadow-xs ${cellBg}`}
+                  {selectedSpace && (
+                    <button
+                      type="button"
+                      onClick={() => handleStartEdit(selectedSpace)}
+                      className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs sm:text-sm font-extrabold">{dayNumber}</span>
-                        {booking?.status === 'confirmed' && (
-                          <span className="w-2 h-2 rounded-full bg-rose-600"></span>
-                        )}
-                        {booking?.status === 'pending' && (
-                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                        )}
-                        {visit && !booking && (
-                          <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
-                        )}
-                        {maintenance && (
-                          <Wrench className="w-3 h-3 text-slate-500" />
-                        )}
-                      </div>
-
-                      <div className="mt-1 space-y-1">
-                        {booking?.status === 'confirmed' && (
-                          <div className="p-1 rounded-lg bg-rose-100 text-[10px] leading-tight text-rose-950 font-semibold border border-rose-200">
-                            <div className="flex items-center gap-1 font-bold text-rose-900 truncate">
-                              <Lock className="w-2.5 h-2.5 text-rose-700 shrink-0" />
-                              <span className="truncate">
-                                {booking.rentalModality === 'por_hora' || booking.hourStart !== undefined
-                                  ? `${booking.hourStart ?? 10}:00-${booking.hourEnd ?? 14}:00`
-                                  : booking.rentalModality === 'mensual'
-                                  ? `Mes ${booking.rentalMonth?.slice(-2) || 'Completo'}`
-                                  : 'Día Completo'}
-                              </span>
-                            </div>
-                            <div className="font-extrabold text-[9px] text-rose-700 mt-0.5 truncate">
-                              {booking.tenantName.split(' ')[0]} • {formatClp(booking.subtotalClp)}
-                            </div>
-                          </div>
-                        )}
-
-                        {booking?.status === 'pending' && (
-                          <div className="p-1 rounded-lg bg-amber-100 text-[10px] leading-tight text-amber-950 font-semibold border border-amber-200">
-                            <div className="flex items-center gap-1 font-bold text-amber-900 truncate">
-                              <Clock className="w-2.5 h-2.5 text-amber-700 shrink-0" />
-                              <span className="truncate">
-                                {booking.rentalModality === 'por_hora' || booking.hourStart !== undefined
-                                  ? `${booking.hourStart ?? 10}:00-${booking.hourEnd ?? 14}:00`
-                                  : booking.rentalModality === 'mensual'
-                                  ? `Mes ${booking.rentalMonth?.slice(-2) || 'Completo'}`
-                                  : 'Día Completo'}
-                              </span>
-                            </div>
-                            <div className="font-extrabold text-[9px] text-amber-800 mt-0.5 truncate">
-                              ⚡ Solicitud: {booking.tenantName.split(' ')[0]}
-                            </div>
-                          </div>
-                        )}
-
-                        {visit && (
-                          <div className="p-1 rounded-md bg-indigo-100 text-[10px] leading-tight text-indigo-900 truncate font-semibold">
-                            Visita {visit.visitTimeSlot}
-                          </div>
-                        )}
-
-                        {maintenance && (
-                          <div className="p-1 rounded-md bg-slate-200 text-[10px] leading-tight text-slate-700 truncate font-semibold">
-                            Mantención
-                          </div>
-                        )}
-
-                        {isMonthEnd && !booking && !maintenance && (
-                          <div className="p-1 rounded-md bg-emerald-100 text-[9px] leading-tight text-emerald-800 font-bold">
-                            Liquidación Cierre Mes
-                          </div>
-                        )}
-
-                        {!booking && !visit && !maintenance && (
-                          <div className="text-[10px] text-slate-400 font-medium hidden sm:block">
-                            Disponible
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Banner informativo de tarifas y bloqueos */}
-              <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-indigo-950">
-                <div className="flex items-center gap-2">
-                  <Info className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>
-                    Haz clic sobre cualquier fecha disponible para crear una tarifa especial, bloquear por eventos privados o programar sanitización obligatoria.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => {
-                      if (selectedSpace) handleStartEdit(selectedSpace);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-white border border-indigo-200 font-bold text-xs text-indigo-900 hover:bg-indigo-100 transition shadow-2xs cursor-pointer"
-                  >
-                    Ver Tarifas Dinámicas
-                  </button>
-                  <button
-                    onClick={() => setIsMaintenanceModalOpen(true)}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition shadow-2xs cursor-pointer"
-                  >
-                    Bloquear Fecha
-                  </button>
+                      <Pencil className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Editar Tarifas y Ficha</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
+
+            {/* Componente Maestro de Disponibilidad Horaria en Modo Propietario (Permite ver horas pasadas y ocupaciones) */}
+            {selectedSpace && (
+              <SpaceAvailabilityViewer
+                space={selectedSpace}
+                modality={
+                  selectedSpace.rentalModality === 'mensual'
+                    ? 'mensual'
+                    : selectedSpace.rentalModality === 'por_hora'
+                    ? 'por_hora'
+                    : selectedSpace.rentalModality === 'por_dia'
+                    ? 'por_dia'
+                    : undefined
+                }
+                startDate={ownerSelectedDate}
+                endDate={ownerSelectedDate}
+                onSelectDateRange={(start) => setOwnerSelectedDate(start)}
+                selectedHourStart={10}
+                selectedHourEnd={14}
+                isOwnerView={true}
+                onViewContract={handleViewReservationContract}
+                onContactTenant={(t) => setContactModalTenant(t)}
+                onApproveReservation={(resId) => updateReservationStatus(resId, 'confirmed')}
+                onBlockMaintenance={(date) => {
+                  setMaintenanceDate(date);
+                  setIsMaintenanceModalOpen(true);
+                }}
+              />
+            )}
 
             {/* Ficha Resumen del Recinto Seleccionado (Bottom Card) */}
             {selectedSpace && (
@@ -1665,22 +1484,30 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                   return filteredPending.map((res) => (
                     <div
                       key={res.id}
-                      className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200 hover:border-slate-300 transition space-y-3"
+                      onClick={() => handleNavigateToBookingInCalendar(res)}
+                      className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200 hover:border-indigo-300 hover:shadow-md hover:bg-indigo-50/20 transition space-y-3 cursor-pointer group"
+                      title="Haz clic para ver esta solicitud en el calendario de disponibilidad del recinto"
                     >
-                      {/* DESTACADO CLAVE: Recinto al que postula */}
+                      {/* DESTACADO CLAVE: Recinto al que postula + Link al Calendario */}
                       <div className="flex items-center justify-between gap-2">
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-indigo-100 text-indigo-900 border border-indigo-200 text-xs font-bold truncate">
-                          <Building className="w-3.5 h-3.5 text-indigo-700 shrink-0" />
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-indigo-100 text-indigo-900 border border-indigo-200 text-xs font-bold truncate group-hover:bg-indigo-600 group-hover:text-white transition">
+                          <Building className="w-3.5 h-3.5 shrink-0" />
                           <span className="truncate">Postula a: {res.spaceTitle}</span>
                         </div>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 whitespace-nowrap">
-                          Expira en 4h
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 group-hover:bg-indigo-100 hidden sm:inline-flex items-center gap-1">
+                            <CalendarIcon className="w-2.5 h-2.5" />
+                            <span>Ver en Calendario →</span>
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 whitespace-nowrap">
+                            Expira en 4h
+                          </span>
+                        </div>
                       </div>
 
                       {/* Datos del Cliente */}
                       <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-full bg-slate-900 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                        <div className="w-9 h-9 rounded-full bg-slate-900 text-white font-bold text-xs flex items-center justify-center shrink-0 group-hover:bg-indigo-900 transition">
                           {res.tenantName.split(' ').map((n) => n[0]).slice(0, 2).join('')}
                         </div>
                         <div className="min-w-0 flex-1">
@@ -1692,11 +1519,16 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                       </div>
 
                       {/* Detalles del Arriendo Solicitado */}
-                      <div className="p-3 rounded-xl bg-white text-[11px] space-y-1.5 text-slate-700 border border-slate-100 shadow-2xs">
-                        <div className="flex items-center gap-1.5 font-semibold text-slate-900">
-                          <CalendarIcon className="w-3.5 h-3.5 text-slate-500" />
-                          <span>
-                            {res.startDate} {res.durationUnits ? `• ${res.durationUnits} hrs` : `• ${res.totalDays} días`}
+                      <div className="p-3 rounded-xl bg-white text-[11px] space-y-1.5 text-slate-700 border border-slate-100 shadow-2xs group-hover:border-indigo-100 transition">
+                        <div className="flex items-center justify-between gap-1.5 font-semibold text-slate-900">
+                          <div className="flex items-center gap-1.5">
+                            <CalendarIcon className="w-3.5 h-3.5 text-indigo-600" />
+                            <span className="font-bold">
+                              {res.startDate} {res.durationUnits ? `• ${res.durationUnits} hrs (${res.hourStart ?? 9}:00 a ${res.hourEnd ?? (res.hourStart ?? 9) + (res.durationUnits || 4)}:00)` : `• ${res.totalDays} días`}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-indigo-600">
+                            Abrir fecha ↗
                           </span>
                         </div>
                         <p className="text-slate-600 line-clamp-2">
@@ -1713,7 +1545,11 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                       {/* Acciones: Ver Contrato, Consultar, Aprobar, Rechazar */}
                       <div className="pt-1 flex items-center gap-2 flex-wrap">
                         <button
-                          onClick={() => handleViewReservationContract(res)}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleViewReservationContract(res);
+                          }}
                           className="flex-1 min-w-[110px] py-2 px-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 font-bold text-[11px] flex items-center justify-center gap-1 transition shadow-2xs cursor-pointer"
                           title="Ver contrato digital formal para este arriendo"
                         >
@@ -1721,12 +1557,16 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                           <span>Ver Contrato</span>
                         </button>
                         <button
-                          onClick={() => setContactModalTenant({
-                            name: res.tenantName,
-                            phone: '+56 9 8765 4321',
-                            email: res.tenantEmail,
-                            spaceTitle: res.spaceTitle,
-                          })}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setContactModalTenant({
+                              name: res.tenantName,
+                              phone: '+56 9 8765 4321',
+                              email: res.tenantEmail,
+                              spaceTitle: res.spaceTitle,
+                            });
+                          }}
                           className="py-2 px-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-bold text-[11px] flex items-center justify-center gap-1 transition cursor-pointer"
                           title="Contactar al arrendatario"
                         >
@@ -1734,7 +1574,9 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({ onOpenOw
                           <span>Consultar</span>
                         </button>
                         <button
-                          onClick={() => {
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             if (res.startDate < todayIso) {
                               alert('Las reservas para aprobar deben ser del día actual hacia adelante.');
                               return;

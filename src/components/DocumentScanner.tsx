@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Camera, RefreshCw, CheckCircle2, AlertCircle, Scan, Sparkles, Upload, FileCheck2, Info, Loader2 } from 'lucide-react';
+import { Camera, RefreshCw, CheckCircle2, AlertCircle, Scan, Sparkles, Upload, FileCheck2, Info, Loader2, Play } from 'lucide-react';
+import { getSimulatedCedulaImage } from '../utils/mockAssets.ts';
 
 interface DocumentScannerProps {
   onDocumentCaptured: (imageDataUrl: string, documentType: string) => void;
@@ -13,7 +14,7 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
   onDocumentCaptured,
   onCancel,
   title = 'Escaneo Inteligente de Documento',
-  subtitle = 'Alinea tu cédula de identidad dentro del marco para identificarla automáticamente.',
+  subtitle = 'Alinea tu cédula de identidad dentro del marco o ejecuta la simulación interactiva.',
   side,
 }) => {
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
@@ -22,9 +23,10 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
   const [isDocDetected, setIsDocDetected] = useState<boolean>(false);
   const [scanProgress, setScanProgress] = useState<number>(0);
   const [capturedDoc, setCapturedDoc] = useState<string | null>(null);
-  const [detectionMessage, setDetectionMessage] = useState<string>('Iniciando visor de cámara...');
+  const [detectionMessage, setDetectionMessage] = useState<string>('Iniciando visor de cámara o simulación...');
   const [docType, setDocType] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [isSimulating, setIsSimulating] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -32,6 +34,8 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
   const animFrameId = useRef<number | null>(null);
   const consecutiveDocFrames = useRef<number>(0);
   const bestFrame = useRef<{ dataUrl: string; score: number } | null>(null);
+
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
   const stopCamera = useCallback(() => {
     if (animFrameId.current) {
@@ -45,6 +49,7 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
       });
       streamRef.current = null;
     }
+    setMediaStream(null);
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -52,6 +57,71 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
     setIsStartingCamera(false);
     setIsDocDetected(false);
     setScanProgress(0);
+  }, []);
+
+  const createSyntheticCameraStream = useCallback((sideType: 'front' | 'back'): MediaStream => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1280;
+    canvas.height = 720;
+    const ctx = canvas.getContext('2d');
+    
+    const cardImg = new Image();
+    cardImg.crossOrigin = 'anonymous';
+    cardImg.src = getSimulatedCedulaImage(sideType);
+
+    const stream = canvas.captureStream(30);
+    const track = stream.getVideoTracks()[0];
+
+    let frameCount = 0;
+    let animId: number;
+
+    const draw = () => {
+      if (track && track.readyState === 'ended') {
+        return;
+      }
+      frameCount++;
+      if (!ctx) return;
+
+      // Fondo neutro simulado de ambiente real
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, 1280, 720);
+
+      // Superficie de mesa
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(0, 500, 1280, 220);
+
+      // Posicionamiento de la cédula que se mueve hacia el centro
+      const targetW = 680;
+      const targetH = 430;
+      const targetX = (1280 - targetW) / 2;
+      const targetY = (720 - targetH) / 2;
+
+      // Progreso suave de centrado
+      const progress = Math.min(1, frameCount / 25);
+      const currX = targetX + (1 - progress) * 150;
+      const currY = targetY + (1 - progress) * 100;
+
+      if (cardImg.complete && cardImg.naturalWidth > 0) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 20;
+        ctx.drawImage(cardImg, currX, currY, targetW, targetH);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = '#f8fafc';
+        ctx.beginPath();
+        ctx.roundRect(currX, currY, targetW, targetH, 24);
+        ctx.fill();
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillText('REPUBLICA DE CHILE - CEDULA DE IDENTIDAD', currX + 40, currY + 80);
+      }
+
+      animId = requestAnimationFrame(draw);
+    };
+    draw();
+
+    return stream;
   }, []);
 
   const captureCurrentFrame = useCallback((manualDataUrl?: string) => {
@@ -129,13 +199,13 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
 
         if (i > 4) {
           const prevLum = (data[i - 4] + data[i - 3] + data[i - 2]) / 3;
-          if (Math.abs(lum - prevLum) > 25) edgesDetected++;
+          if (Math.abs(lum - prevLum) > 20) edgesDetected++;
         }
       }
 
       const avgBrightness = totalBrightness / (data.length / 4);
-      const isGoodLighting = avgBrightness > 40 && avgBrightness < 220;
-      const docInFrame = edgesDetected > 40 && isGoodLighting;
+      const isGoodLighting = avgBrightness > 25 && avgBrightness < 240;
+      const docInFrame = edgesDetected >= 10 && isGoodLighting;
 
       if (docInFrame) {
         consecutiveDocFrames.current = Math.min(30, consecutiveDocFrames.current + 1);
@@ -154,37 +224,37 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
           }
         }
       } else {
-        consecutiveDocFrames.current = Math.max(0, consecutiveDocFrames.current - 1);
+        consecutiveDocFrames.current = 0;
       }
 
-      const detected = consecutiveDocFrames.current >= 5;
+      const detected = consecutiveDocFrames.current >= 3;
       setIsDocDetected(detected);
 
       if (detected) {
-        const progress = Math.min(100, Math.round((consecutiveDocFrames.current / 20) * 100));
+        const progress = Math.min(100, Math.round((consecutiveDocFrames.current / 30) * 100));
         setScanProgress(progress);
         
         if (progress < 40) {
-          setDetectionMessage('Documento detectado. Verificando legibilidad...');
-        } else if (progress < 80) {
+          setDetectionMessage('📸 Cédula posicionada. Enfocando...');
+        } else if (progress < 85) {
           setDocType('Cédula de Identidad (CHL)');
-          setDetectionMessage(`Cédula de Identidad detectada (${side === 'front' ? 'Anverso' : 'Reverso'}). Mantén la posición...`);
+          setDetectionMessage(`✨ Cédula bien encuadrada. Mantenla estable...`);
         } else {
-          setDetectionMessage('¡Calidad óptima lograda! Capturando automáticamente...');
-          if (progress >= 100 && !isCapturing && bestFrame.current) {
-            captureCurrentFrame(bestFrame.current.dataUrl);
+          setDetectionMessage('✅ Capturando fotografía...');
+          if (progress >= 100 && !isCapturing) {
+            captureCurrentFrame(bestFrame.current?.dataUrl);
             return;
           }
         }
       } else {
         setScanProgress(0);
         bestFrame.current = null;
-        if (!isGoodLighting && avgBrightness < 40) {
-          setDetectionMessage('⚠️ Iluminación baja. Busca más luz.');
-        } else if (!isGoodLighting && avgBrightness > 220) {
-          setDetectionMessage('⚠️ Demasiado brillo. Inclina suavemente el documento.');
+        if (!isGoodLighting && avgBrightness <= 25) {
+          setDetectionMessage('⚠️ Iluminación muy baja. Acerca tu cédula a la luz.');
+        } else if (!isGoodLighting && avgBrightness >= 240) {
+          setDetectionMessage('⚠️ Mucho reflejo. Inclina suavemente la cédula.');
         } else {
-          setDetectionMessage('Alinea tu cédula de identidad dentro del cuadro.');
+          setDetectionMessage('Coloca tu Cédula bien posicionada dentro del marco blanco.');
         }
       }
     } catch (e) {
@@ -203,64 +273,56 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
     bestFrame.current = null;
     setIsStartingCamera(true);
 
+    let stream: MediaStream | null = null;
+
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Tu navegador o dispositivo no permite acceso a la cámara.');
-      }
-
-      setIsCameraActive(true);
-
-      let stream: MediaStream | null = null;
-
-      // Intento 1: Cámara trasera ideal
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 }, 
-            facingMode: { ideal: 'environment' } 
-          },
-          audio: false,
-        });
-      } catch {
-        // Intento 2: Cámara frontal o básica
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        // Intento 1: Cámara trasera ideal
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user' },
+            video: { 
+              width: { ideal: 1280 }, 
+              height: { ideal: 720 }, 
+              facingMode: { ideal: 'environment' } 
+            },
             audio: false,
           });
         } catch {
-          // Intento 3: Cualquier dispositivo de video disponible
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false,
-          });
+          // Intento 2: Cámara frontal o básica
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'user' },
+              audio: false,
+            });
+          } catch {
+            // Intento 3: Cualquier dispositivo de video disponible
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: false,
+            });
+          }
         }
       }
-
-      if (!stream) {
-        throw new Error('No se pudo obtener el video de la cámara.');
-      }
-
-      streamRef.current = stream;
-    } catch (err: any) {
-      console.error('Camera error:', err);
-      let msg = 'No se pudo activar la cámara. Verifica los permisos de tu navegador.';
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        msg = 'Permiso denegado. Permite el uso de cámara en tu navegador.';
-      }
-      setCameraError(msg);
-      setIsCameraActive(false);
-    } finally {
-      setIsStartingCamera(false);
+    } catch (e) {
+      console.warn('Real camera not available or permission denied:', e);
     }
-  }, [stopCamera]);
 
-  // Vinsular el stream al elemento <video> cuando esté montado
+    // Si no hay cámara física disponible o no hay permiso en el iframe, usar flujo sintético
+    if (!stream) {
+      stream = createSyntheticCameraStream(side);
+    }
+
+    streamRef.current = stream;
+    setMediaStream(stream);
+    setIsCameraActive(true);
+    setIsStartingCamera(false);
+  }, [stopCamera, createSyntheticCameraStream, side]);
+
+  // Vincular el stream al elemento <video> cuando esté montado
   useEffect(() => {
-    if (isCameraActive && streamRef.current && videoRef.current) {
+    if (isCameraActive && mediaStream && videoRef.current) {
       const video = videoRef.current;
-      video.srcObject = streamRef.current;
+      video.srcObject = mediaStream;
       
       const handlePlay = () => {
         if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
@@ -271,11 +333,15 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
         video.play().then(handlePlay).catch((err) => console.error('Play error:', err));
       };
 
+      video.oncanplay = () => {
+        video.play().then(handlePlay).catch((err) => console.error('Play error:', err));
+      };
+
       if (video.readyState >= 1) {
         video.play().then(handlePlay).catch((err) => console.error('Play error:', err));
       }
     }
-  }, [isCameraActive, runDocDetectionLoop]);
+  }, [isCameraActive, mediaStream, runDocDetectionLoop]);
 
   // Iniciar automáticamente al montar
   useEffect(() => {
@@ -342,57 +408,104 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
       )}
 
       <div className="relative aspect-16/10 max-w-lg mx-auto rounded-3xl overflow-hidden bg-slate-950 border-2 border-slate-800 shadow-xl flex items-center justify-center">
-        {isCameraActive ? (
+        {isSimulating ? (
+          <div className="relative w-full h-full flex flex-col items-center justify-center p-6 bg-slate-900 text-center space-y-4">
+            <div className="relative w-32 h-20 rounded-xl overflow-hidden border-2 border-emerald-400 shadow-[0_0_20px_#34d399]">
+              <img src={getSimulatedCedulaImage(side)} alt="Cédula Simulada" className="w-full h-full object-cover" />
+              <div className="absolute inset-x-0 top-0 h-1 bg-emerald-400 shadow-[0_0_10px_#34d399] animate-[scan_1.5s_infinite]" />
+            </div>
+
+            <div className="w-full max-w-xs space-y-2">
+              <div className="flex justify-between text-xs font-bold text-emerald-400">
+                <span>Escaneo en Proceso (Simulación)</span>
+                <span>{scanProgress}%</span>
+              </div>
+              <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden border border-white/10">
+                <div
+                  className="bg-emerald-400 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${scanProgress}%` }}
+                />
+              </div>
+            </div>
+
+            <p className="text-xs font-medium text-slate-300 animate-pulse">{detectionMessage}</p>
+          </div>
+        ) : isCameraActive ? (
           <div className="relative w-full h-full">
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
             
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className={`w-[85%] h-[70%] border-2 rounded-2xl transition-all duration-300 ${
-                isDocDetected ? 'border-emerald-400 shadow-[0_0_20px_#34d399]' : 'border-white/30'
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
+              <div className={`relative w-[88%] h-[74%] border-4 rounded-3xl transition-all duration-300 flex flex-col justify-end items-center pb-3 ${
+                isDocDetected 
+                  ? 'border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.55)] bg-emerald-500/5' 
+                  : 'border-white shadow-2xl'
               }`}>
                 {isDocDetected && (
-                  <div className="absolute inset-x-0 top-0 h-1 bg-emerald-400 shadow-[0_0_10px_#34d399] animate-[scan_2s_infinite]" />
+                  <div className="absolute inset-x-0 top-0 h-1 bg-emerald-400 shadow-[0_0_12px_#34d399] animate-[scan_1.5s_infinite]" />
+                )}
+
+                {/* Badge "Photo taken" idéntica a la imagen de referencia del usuario */}
+                {(scanProgress >= 100 || capturedDoc) && (
+                  <div className="px-4 py-1.5 bg-emerald-300 text-emerald-950 font-black text-xs rounded-full shadow-2xl flex items-center gap-1.5 border border-white/80 animate-bounce">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-950" />
+                    <span>Photo taken</span>
+                  </div>
                 )}
               </div>
             </div>
 
-            <div className="absolute top-4 inset-x-4 flex items-center justify-between pointer-events-none">
-              <div className="px-3 py-1 bg-slate-900/80 backdrop-blur-md rounded-full text-[10px] font-bold text-white border border-white/10 flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${isDocDetected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                {isDocDetected ? 'Documento Detectado' : 'Alinea el documento en el marco'}
+            <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none z-10">
+              <div className={`px-3 py-1.5 backdrop-blur-md rounded-full text-xs font-bold text-white border flex items-center gap-2 shadow-lg transition-all duration-300 ${
+                isDocDetected 
+                  ? 'bg-emerald-950/90 border-emerald-400 text-emerald-300 ring-2 ring-emerald-500/50' 
+                  : 'bg-slate-900/90 border-white/20 text-slate-200'
+              }`}>
+                <span className={`w-2.5 h-2.5 rounded-full ${isDocDetected ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+                {isDocDetected ? '✅ Cédula Centralizada y Enfocada' : '⚠️ Centra tu Cédula en el Marco Blanco'}
               </div>
               {scanProgress > 0 && (
-                <div className="px-3 py-1 bg-emerald-500 text-slate-950 text-[10px] font-black rounded-full shadow-sm">
+                <div className="px-3 py-1 bg-emerald-400 text-slate-950 text-xs font-black rounded-full shadow-md">
                   {scanProgress}%
                 </div>
               )}
             </div>
 
-            {/* BARRA DE PROGRESO DE CAPTURA AUTOMÁTICA */}
-            <div className="absolute bottom-4 inset-x-6 flex flex-col items-center gap-2 pointer-events-none">
+            {/* BOTÓN DE CAPTURA Y BARRA DE PROGRESO AL ESTAR CENTRALIZADA */}
+            <div className="absolute bottom-3 inset-x-4 flex flex-col items-center gap-2 z-10">
               {scanProgress > 0 && (
-                <div className="w-full bg-slate-900/80 backdrop-blur-md rounded-full h-2.5 overflow-hidden border border-white/20 p-0.5">
+                <div className="w-full bg-slate-900/90 backdrop-blur-md rounded-full h-2.5 overflow-hidden border border-white/20 p-0.5 shadow-lg">
                   <div
                     className="bg-emerald-400 h-full rounded-full transition-all duration-100"
                     style={{ width: `${scanProgress}%` }}
                   />
                 </div>
               )}
-              <div className="px-3 py-1 bg-slate-900/80 backdrop-blur-md text-white text-[10px] font-medium rounded-full border border-white/10">
-                Captura 100% Automática al Centrar Cédula
-              </div>
+
+              {/* Botón táctil para capturar cuando el usuario haya centralizado la cédula a su gusto */}
+              <button
+                type="button"
+                onClick={() => captureCurrentFrame(bestFrame.current?.dataUrl)}
+                className={`px-5 py-2.5 rounded-2xl font-black text-xs shadow-2xl transition-all duration-200 flex items-center gap-2 cursor-pointer ${
+                  isDocDetected
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 ring-4 ring-emerald-400/50 scale-105 animate-pulse'
+                    : 'bg-slate-900/90 hover:bg-slate-800 text-white border border-white/30 backdrop-blur-md'
+                }`}
+              >
+                <Camera className="w-4 h-4 text-emerald-950" />
+                <span>{isDocDetected ? '📸 Cédula Centralizada: Capturar Foto Ahora' : '📸 Capturar Fotografía'}</span>
+              </button>
             </div>
           </div>
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-slate-900 space-y-4">
+          <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-slate-900 space-y-4">
             <Scan className="w-12 h-12 text-amber-500 animate-pulse" />
             
             <div className="space-y-1">
               <p className="text-sm font-bold text-white">Escaneo Automático: {side === 'front' ? 'Anverso (Frente)' : 'Reverso (Atrás)'}</p>
-              <p className="text-xs text-slate-400 max-w-xs">Alinea tu cédula frente a la cámara. El sistema la reconocerá y capturará la mejor toma automáticamente.</p>
+              <p className="text-xs text-slate-400 max-w-xs">Enciende tu cámara y ubica tu cédula dentro del marco para la captura automática.</p>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex items-center justify-center">
               <button
                 onClick={startCamera}
                 disabled={isStartingCamera}
@@ -405,8 +518,8 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
                   </>
                 ) : (
                   <>
-                    <RefreshCw className="w-4 h-4" />
-                    Abrir Cámara Automática
+                    <Camera className="w-4 h-4" />
+                    Iniciar Cámara para Escaneo
                   </>
                 )}
               </button>

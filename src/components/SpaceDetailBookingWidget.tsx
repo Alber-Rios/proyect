@@ -898,13 +898,29 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
               </div>
 
               {/* Botones visuales de franjas horarias */}
-              <div className="space-y-1.5 bg-slate-50/70 p-3 rounded-2xl border border-slate-200">
+              <div className="space-y-2 bg-slate-50/70 p-3 rounded-2xl border border-slate-200">
                 <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase">
                   <span>Franjas Horarias del Día (09:00 - 21:00)</span>
                   <span className={occupiedHoursOnSelectedDate.size > 0 ? "text-rose-700 font-bold lowercase" : "text-emerald-700 font-semibold lowercase"}>
-                    {occupiedHoursOnSelectedDate.size > 0 ? `${occupiedHoursOnSelectedDate.size} hrs ocupadas/bloqueadas` : '100% disponible'}
+                    {occupiedHoursOnSelectedDate.size > 0 ? `${occupiedHoursOnSelectedDate.size} hrs pedidas / ocupadas` : '100% disponible'}
                   </span>
                 </div>
+
+                <div className="flex items-center gap-3 text-[10px] text-slate-500 py-0.5">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                    Disponible
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
+                    Pedida / Ocupada
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-[#1e293b] inline-block" />
+                    Tu Selección
+                  </span>
+                </div>
+
                 <div className="flex flex-wrap gap-1">
                   {[9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((h) => {
                     const isOccupied = occupiedHoursOnSelectedDate.has(h);
@@ -919,13 +935,13 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                           onHourEndChange(Math.min(22, h + totalHours));
                         }}
                         disabled={isOccupied}
-                        title={isOccupied ? `Franja ${h}:00 ocupada o reservada` : `Franja ${h}:00 disponible`}
+                        title={isOccupied ? `Franja ${h}:00 pedida u ocupada` : `Franja ${h}:00 disponible`}
                         className={`text-[10px] font-extrabold px-2 py-1 rounded-lg border transition cursor-pointer ${
                           isOccupied
-                            ? 'bg-rose-50 text-rose-400 line-through cursor-not-allowed border-rose-200 opacity-60'
+                            ? 'bg-rose-100 text-rose-600 line-through cursor-not-allowed border-rose-300 font-medium'
                             : isSelected
-                            ? 'bg-[#1e293b] text-white border-[#1e293b] shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                            ? 'bg-[#1e293b] text-white border-[#1e293b] shadow-xs ring-1 ring-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/40'
                         }`}
                       >
                         {String(h).padStart(2, '0')}:00
@@ -933,6 +949,18 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                     );
                   })}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById('calendario-disponibilidad');
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  className="w-full text-center text-[10px] font-bold text-rose-600 hover:text-rose-700 pt-1 flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <CalendarIcon className="w-3 h-3" />
+                  <span>Ver calendario completo y detalle de horas pedidas</span>
+                </button>
               </div>
             </div>
           )}
@@ -982,25 +1010,19 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
               </div>
             </div>
 
-            {/* Sugerencias automáticas e inteligentes */}
+            {/* Sugerencias rápidas o redacción libre */}
             <div className="space-y-1.5 pt-0.5">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-rose-500" />
-                  Sugerencias automáticas para este espacio:
+                  Sugerencias rápidas (o redacta libremente):
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (automaticSuggestions.length > 0) {
-                      onIntendedUseChange(automaticSuggestions[0].fullText);
-                    }
-                  }}
-                  className="text-[10px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 cursor-pointer transition hover:underline"
-                >
-                  <Sparkles className="w-2.5 h-2.5" />
-                  <span>Autocompletar propuesta</span>
-                </button>
+                {intendedUse.trim().length > 0 && (
+                  <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                    <Check className="w-3 h-3 text-emerald-600" />
+                    Propuesta lista
+                  </span>
+                )}
               </div>
 
               <div className="flex flex-wrap gap-1.5">
@@ -1010,8 +1032,8 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                     <button
                       key={idx}
                       type="button"
-                      onClick={() => onIntendedUseChange(sug.fullText)}
-                      title="Haz clic para cargar esta propuesta automática y luego edítala a tu gusto"
+                      onClick={() => onIntendedUseChange(isSelected ? '' : sug.fullText)}
+                      title="Haz clic para seleccionar esta sugerencia o editarla"
                       className={`text-[11px] px-2.5 py-1.5 rounded-xl border transition cursor-pointer text-left ${
                         isSelected
                           ? 'bg-[#1e293b] text-white border-[#1e293b] font-bold shadow-xs'

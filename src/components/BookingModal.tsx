@@ -112,7 +112,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     initialEndDate && initialEndDate >= todayStr ? initialEndDate : (initialStartDate || todayStr)
   );
   const [bookingTimeSlots, setBookingTimeSlots] = useState<string[]>(initialTimeSlots || []);
-  const [intendedUse, setIntendedUse] = useState(initialIntendedUse || 'Reunión de equipo y coworking');
+  const [intendedUse, setIntendedUse] = useState(initialIntendedUse || '');
   const [acceptContract, setAcceptContract] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
@@ -586,7 +586,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                       </div>
 
                       <p>
-                        <strong>Primero:</strong> El Arrendador da en arriendo el Inmueble detallado precedentemente al Arrendatario, quien lo acepta para el uso exclusivo de: <strong>{intendedUse || 'Reunión de equipo y coworking'}</strong>.
+                        <strong>Primero:</strong> El Arrendador da en arriendo el Inmueble detallado precedentemente al Arrendatario, quien lo acepta para el uso exclusivo de: <strong>{intendedUse.trim() || 'Actividades comerciales o profesionales lícitas declaradas por el arrendatario'}</strong>.
                       </p>
                       
                       <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">

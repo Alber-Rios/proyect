@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext.tsx';
 import { formatRut } from '../utils/formatters.ts';
 import { DocumentScanner } from '../components/DocumentScanner.tsx';
 import { RealtimeFaceScanner } from '../components/RealtimeFaceScanner.tsx';
+import { verifyKycWithServer } from '../utils/verificationService.ts';
 
 import {
   ShieldCheck,
@@ -274,7 +275,7 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate, onOp
     setCurrentStep(3);
   };
 
-  // VALIDACIÓN PASO 3 Y ENVÍO FINAL: Simulación de Extracción AI y Verificación Automática
+  // VALIDACIÓN PASO 3 Y ENVÍO FINAL: Extracción AI y Verificación Automática de Cédula y Rostro
   const handleFinalSubmit = async () => {
     setError(null);
     if (!criminalRecordFile) {
@@ -283,28 +284,31 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate, onOp
     }
 
     setLoading(true);
-    setExtractionProgress(0);
-    setExtractionMessage('Iniciando extracción inteligente de datos...');
+    setExtractionProgress(10);
+    setExtractionMessage('Iniciando escaneo inteligente de Cédula y reconocimiento facial...');
 
     try {
-      // Simulación de proceso OCR y Verificación AI
-      const steps = [
-        { progress: 15, message: 'Analizando anverso de la cédula...' },
-        { progress: 30, message: 'Documento identificado: Cédula de Identidad (CHL)' },
-        { progress: 45, message: 'Extrayendo RUT y Nombre mediante OCR...' },
-        { progress: 60, message: 'Cotejando rostro con fotografía del documento...' },
-        { progress: 80, message: 'Analizando Certificado de Antecedentes...' },
-        { progress: 95, message: 'Validando integridad de los datos...' },
-        { progress: 100, message: 'Verificación completada con éxito.' },
-      ];
+      setExtractionProgress(30);
+      setExtractionMessage('Enviando imágenes al servidor AI de verificación biométrica...');
 
-      for (const step of steps) {
-        await new Promise(resolve => setTimeout(resolve, 800));
-        setExtractionProgress(step.progress);
-        setExtractionMessage(step.message);
-      }
+      // Llamada real al backend Gemini 3.8 Flash Vision AI
+      const kycRes = await verifyKycWithServer({
+        idFrontPhoto: idFrontPhoto!,
+        idBackPhoto: idBackPhoto || undefined,
+        facialPhoto: facialPhoto!,
+        expectedRut: currentUser.rut,
+        expectedName: currentUser.fullName,
+      });
 
-      // Actualizar estado del usuario
+      setExtractionProgress(70);
+      setExtractionMessage(`Coincidencia biométrica del ${kycRes.data.faceMatchScore}%. Validando cédula...`);
+
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      setExtractionProgress(100);
+      setExtractionMessage('¡Escaneo de Cédula y Reconocimiento Facial completados!');
+
+      // Actualizar estado del usuario con los datos extraídos por la AI
       updateUserProfile({
         verificationStatus: 'pending',
         avatarUrl: facialPhoto || currentUser.avatarUrl,
@@ -317,21 +321,24 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate, onOp
           idBackCaptured: true,
           idFrontUrl: idFrontPhoto || undefined,
           idBackUrl: idBackPhoto || undefined,
-          rutNumber: currentUser.rut,
-          documentSerialNumber: 'DOC-' + currentUser.rut.slice(0, 8),
+          rutNumber: kycRes.data.extractedRut || currentUser.rut,
+          documentSerialNumber: kycRes.data.documentSerialNumber,
           criminalRecordSubmitted: true,
           criminalRecordValid: true,
           criminalRecordDocCode: criminalRecordFileName,
           submittedAt: new Date().toISOString(),
           manualReviewRequired: true,
-          manualReviewNotes: 'Datos extraídos automáticamente vía AI Spotly. Expediente remitido para revisión administrativa final.',
+          manualReviewNotes: `${kycRes.data.summary} (Proveedor: ${kycRes.provider})`,
         },
       });
 
       addAuditRecord('VERIFICATION_AI_EXTRACTION_COMPLETED', 'security', {
         userId: currentUser.id,
         rut: currentUser.rut,
+        extractedRut: kycRes.data.extractedRut,
+        faceMatchScore: kycRes.data.faceMatchScore,
         status: 'pending',
+        provider: kycRes.provider,
         automatedVerification: true,
       });
 

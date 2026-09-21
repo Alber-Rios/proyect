@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext.tsx';
 import {
   Sparkles,
@@ -31,7 +31,15 @@ export const OwnerUpgradeModal: React.FC<OwnerUpgradeModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isOpen || !currentUser) return null;
+  const isAlreadyOwner = currentUser?.role === 'owner' || currentUser?.ownerTermsAccepted;
+
+  useEffect(() => {
+    if (isOpen && isAlreadyOwner) {
+      onClose();
+    }
+  }, [isOpen, isAlreadyOwner, onClose]);
+
+  if (!isOpen || !currentUser || isAlreadyOwner) return null;
 
   const canSubmit = acceptTerms && declareOwnership && acceptFee;
 
