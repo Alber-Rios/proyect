@@ -141,3 +141,26 @@ export function getSpaceRateInfo(space: {
     formatted: `${formatClp(space.pricePerDay)} / día`,
   };
 }
+
+/**
+ * Retorna la fecha actual en formato ISO YYYY-MM-DD según zona horaria local
+ */
+export function getTodayIso(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Retorna una fecha ISO desplazada N días a partir de hoy
+ */
+export function getOffsetDateIso(daysOffset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + daysOffset);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}

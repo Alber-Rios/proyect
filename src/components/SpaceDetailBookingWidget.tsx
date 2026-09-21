@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Space, VisitRequest } from '../types.ts';
-import { formatClp } from '../utils/formatters.ts';
+import { formatClp, getTodayIso } from '../utils/formatters.ts';
 import { useApp } from '../context/AppContext.tsx';
 import {
   Calendar as CalendarIcon,
@@ -16,6 +16,8 @@ import {
   Sparkles,
   Minus,
   Plus,
+  AlertTriangle,
+  Check,
 } from 'lucide-react';
 
 const formatIsoToDateDisplay = (isoStr: string) => {
@@ -70,9 +72,16 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
   onStartVisit,
   onOpenAuth,
 }) => {
-  const { currentUser } = useApp();
+  const { currentUser, reservations } = useApp();
   const [activeTab, setActiveTab] = useState<'booking' | 'visit'>('booking');
   const [monthDuration, setMonthDuration] = useState('6 meses renovables (Estándar)');
+
+  // Reservas activas de este recinto (sincronizadas en tiempo real con el propietario)
+  const activeReservationsForSpace = useMemo(() => {
+    return reservations.filter(
+      (r) => r.spaceId === space.id && r.status !== 'rejected' && r.status !== 'cancelled'
+    );
+  }, [reservations, space.id]);
 
   // Precios base por modalidad
   const priceDay = space.pricePerDay || 350000;
@@ -221,8 +230,58 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
     ];
   }, [space.category, space.title, activeModality, totalHours]);
 
-  // 14 días para disponibilidad diaria en tiempo real a partir del 18 de septiembre de 2026
-  const baseDate = useMemo(() => new Date(2026, 8, 18), []);
+  const todayIso = useMemo(() => getTodayIso(), []);
+
+  // Franjas horarias ocupadas en la fecha seleccionada (sincronizado con reservas y solicitudes del anfitrión)
+  const occupiedHoursOnSelectedDate = useMemo(() => {
+    const occupied = new Set<number>();
+    for (const r of activeReservationsForSpace) {
+      if (startDate >= r.startDate && startDate <= r.endDate) {
+        if (r.rentalModality === 'por_hora') {
+          const startH = r.hourStart ?? 10;
+          const endH = r.hourEnd ?? (startH + (r.durationUnits || r.totalDays || 4));
+          for (let h = startH; h < endH; h++) {
+            occupied.add(h);
+          }
+        } else {
+          // Si está reservado por día o mensual, todo el horario de 9 a 21 está bloqueado
+          for (let h = 9; h <= 21; h++) {
+            occupied.add(h);
+          }
+        }
+      }
+    }
+    return occupied;
+  }, [activeReservationsForSpace, startDate]);
+
+  // Verificar si un mes está ocupado
+  const isMonthOccupied = (monthKey: string) => {
+    return activeReservationsForSpace.some(
+      (r) => r.rentalMonth === monthKey || (r.startDate.startsWith(monthKey) && r.status === 'confirmed')
+    );
+  };
+
+  // Detección estricta de colisión / doble reserva para la selección actual
+  const hasCollision = useMemo(() => {
+    if (activeModality === 'por_dia') {
+      return activeReservationsForSpace.some(
+        (r) => startDate <= r.endDate && endDate >= r.startDate
+      );
+    }
+    if (activeModality === 'por_hora') {
+      for (let h = hourStart; h < hourEnd; h++) {
+        if (occupiedHoursOnSelectedDate.has(h)) return true;
+      }
+      return false;
+    }
+    if (activeModality === 'mensual') {
+      return isMonthOccupied(selectedMonth);
+    }
+    return false;
+  }, [activeModality, activeReservationsForSpace, startDate, endDate, hourStart, hourEnd, occupiedHoursOnSelectedDate, selectedMonth]);
+
+  // 14 días para disponibilidad diaria en tiempo real a partir del día de hoy
+  const baseDate = useMemo(() => new Date(), []);
   const daysList = useMemo(() => {
     return Array.from({ length: 14 }, (_, i) => {
       const d = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + i);
@@ -233,8 +292,16 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
       const weekdayNames = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
       const weekday = weekdayNames[d.getDay()];
       
-      // Jueves 24 y Domingo 27 ocupados
-      const isOccupied = (monthNum === 9 && (dayNum === 24 || dayNum === 27));
+      // Sincronización con reservas reales del anfitrión para evitar doble reserva
+      const hasReservation = activeReservationsForSpace.some((r) => {
+        if (r.rentalModality === 'por_hora') {
+          return iso === r.startDate;
+        }
+        return iso >= r.startDate && iso <= r.endDate;
+      });
+
+      const isOccupied = hasReservation || (monthNum === 9 && (dayNum === 24 || dayNum === 27));
+      const isPast = iso < todayIso;
       const isCheckIn = iso === startDate;
       const isCheckOut = iso === endDate;
       const isSelected = iso >= startDate && iso <= endDate;
@@ -245,15 +312,16 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
         monthNum,
         weekday,
         isOccupied,
+        isPast,
         isCheckIn,
         isCheckOut,
         isSelected,
       };
     });
-  }, [baseDate, startDate, endDate]);
+  }, [baseDate, startDate, endDate, todayIso, activeReservationsForSpace]);
 
-  const handleSelectDay = (dayIso: string, isOccupied: boolean) => {
-    if (isOccupied) return;
+  const handleSelectDay = (dayIso: string, isOccupied: boolean, isPast?: boolean) => {
+    if (isOccupied || isPast || dayIso < todayIso) return;
     if (dayIso < startDate) {
       onStartDateChange(dayIso);
       if (dayIso > endDate) {
@@ -466,33 +534,36 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                   </div>
                 </div>
 
-                {/* Grilla interactiva de 14 días (vie 18 a jue 1) */}
+                {/* Grilla interactiva de 14 días */}
                 <div className="grid grid-cols-7 gap-1 sm:gap-1.5 pt-0.5">
                   {daysList.map((day) => {
                     const isCheckIn = day.isCheckIn;
                     const isCheckOut = day.isCheckOut;
                     const isSelected = day.isSelected;
                     const isOccupied = day.isOccupied;
+                    const isPast = day.isPast;
 
                     return (
                       <button
                         key={day.iso}
                         type="button"
-                        onClick={() => handleSelectDay(day.iso, isOccupied)}
-                        disabled={isOccupied}
-                        title={isOccupied ? 'Fecha ocupada' : `Seleccionar ${day.dayNum} de Septiembre`}
-                        className={`py-2 px-1 rounded-xl border text-center transition flex flex-col items-center justify-between cursor-pointer select-none ${
-                          isOccupied
+                        onClick={() => handleSelectDay(day.iso, isOccupied, isPast)}
+                        disabled={isOccupied || isPast}
+                        title={isPast ? 'Fecha pasada no disponible' : isOccupied ? 'Fecha ocupada' : `Seleccionar ${day.dayNum}`}
+                        className={`py-2 px-1 rounded-xl border text-center transition flex flex-col items-center justify-between select-none ${
+                          isPast
+                            ? 'bg-slate-100/60 border-slate-200 text-slate-400 opacity-40 cursor-not-allowed'
+                            : isOccupied
                             ? 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed'
                             : isCheckIn || isCheckOut
-                            ? 'bg-[#1e293b] border-[#1e293b] text-white shadow-sm ring-2 ring-slate-900/20'
+                            ? 'bg-[#1e293b] border-[#1e293b] text-white shadow-sm ring-2 ring-slate-900/20 cursor-pointer'
                             : isSelected
-                            ? 'bg-slate-800 border-slate-800 text-slate-100'
-                            : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50'
+                            ? 'bg-slate-800 border-slate-800 text-slate-100 cursor-pointer'
+                            : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50 cursor-pointer'
                         }`}
                       >
                         <span className={`text-[10px] uppercase font-bold leading-none ${
-                          isCheckIn || isCheckOut || isSelected ? 'text-slate-300' : 'text-slate-500'
+                          isPast ? 'text-slate-400' : isCheckIn || isCheckOut || isSelected ? 'text-slate-300' : 'text-slate-500'
                         }`}>
                           {day.weekday}
                         </span>
@@ -502,7 +573,9 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                         </span>
 
                         <span className={`text-[8px] sm:text-[8.5px] font-black px-1 py-0.5 rounded leading-none ${
-                          isOccupied
+                          isPast
+                            ? 'bg-slate-200 text-slate-500'
+                            : isOccupied
                             ? 'bg-rose-100 text-rose-700'
                             : isCheckIn
                             ? 'bg-emerald-400 text-slate-950'
@@ -512,7 +585,9 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                             ? 'bg-slate-700 text-white'
                             : 'bg-emerald-50 text-emerald-700'
                         }`}>
-                          {isOccupied
+                          {isPast
+                            ? 'Pasado'
+                            : isOccupied
                             ? 'Ocupado'
                             : isCheckIn
                             ? 'Check-in'
@@ -538,9 +613,11 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                   <div className="relative">
                     <input
                       type="date"
+                      min={todayIso}
                       value={startDate}
                       onChange={(e) => {
                         const val = e.target.value;
+                        if (val < todayIso) return;
                         onStartDateChange(val);
                         if (val > endDate) {
                           onEndDateChange(val);
@@ -564,8 +641,12 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                     <input
                       type="date"
                       value={endDate}
-                      min={startDate}
-                      onChange={(e) => onEndDateChange(e.target.value)}
+                      min={startDate >= todayIso ? startDate : todayIso}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val < todayIso || val < startDate) return;
+                        onEndDateChange(val);
+                      }}
                       className="w-full px-2 py-1 text-xs font-bold border border-slate-200 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
                     />
                   </div>
@@ -574,6 +655,12 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                     <span className="text-[10px] font-bold text-slate-500 block">Check-out: 05:00 PM</span>
                   </div>
                 </div>
+              </div>
+
+              {/* Mensaje de validación informativa */}
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 bg-emerald-50/80 border border-emerald-200 px-3 py-1.5 rounded-xl">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Solo reservas válidas desde hoy ({formatIsoToDateDisplay(todayIso)}) en adelante.</span>
               </div>
             </div>
           )}
@@ -602,10 +689,18 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                     onChange={(e) => onMonthChange(e.target.value)}
                     className="w-full px-2.5 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                   >
-                    <option value="2026-10">01 de Octubre 2026</option>
-                    <option value="2026-11">01 de Noviembre 2026</option>
-                    <option value="2026-12">01 de Diciembre 2026</option>
-                    <option value="2027-01">01 de Enero 2027</option>
+                    <option value="2026-10" disabled={isMonthOccupied('2026-10')}>
+                      01 de Octubre 2026 {isMonthOccupied('2026-10') ? '(Ocupado / Reservado)' : ''}
+                    </option>
+                    <option value="2026-11" disabled={isMonthOccupied('2026-11')}>
+                      01 de Noviembre 2026 {isMonthOccupied('2026-11') ? '(Ocupado / Reservado)' : ''}
+                    </option>
+                    <option value="2026-12" disabled={isMonthOccupied('2026-12')}>
+                      01 de Diciembre 2026 {isMonthOccupied('2026-12') ? '(Ocupado / Reservado)' : ''}
+                    </option>
+                    <option value="2027-01" disabled={isMonthOccupied('2027-01')}>
+                      01 de Enero 2027 {isMonthOccupied('2027-01') ? '(Ocupado / Reservado)' : ''}
+                    </option>
                   </select>
                   <span className="text-[10px] text-slate-500 block">Mín. 1 mes</span>
                 </div>
@@ -755,10 +850,13 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                 </div>
                 <input
                   type="date"
+                  min={todayIso}
                   value={startDate}
                   onChange={(e) => {
-                    onStartDateChange(e.target.value);
-                    onEndDateChange(e.target.value);
+                    const val = e.target.value;
+                    if (val < todayIso) return;
+                    onStartDateChange(val);
+                    onEndDateChange(val);
                   }}
                   className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
                 />
@@ -803,11 +901,13 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
               <div className="space-y-1.5 bg-slate-50/70 p-3 rounded-2xl border border-slate-200">
                 <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase">
                   <span>Franjas Horarias del Día (09:00 - 21:00)</span>
-                  <span className="text-emerald-700 font-semibold lowercase">16h y 17h ocupadas</span>
+                  <span className={occupiedHoursOnSelectedDate.size > 0 ? "text-rose-700 font-bold lowercase" : "text-emerald-700 font-semibold lowercase"}>
+                    {occupiedHoursOnSelectedDate.size > 0 ? `${occupiedHoursOnSelectedDate.size} hrs ocupadas/bloqueadas` : '100% disponible'}
+                  </span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {[9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((h) => {
-                    const isOccupied = h === 16 || h === 17;
+                    const isOccupied = occupiedHoursOnSelectedDate.has(h);
                     const isSelected = h >= hourStart && h < hourEnd;
                     return (
                       <button
@@ -819,9 +919,10 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                           onHourEndChange(Math.min(22, h + totalHours));
                         }}
                         disabled={isOccupied}
+                        title={isOccupied ? `Franja ${h}:00 ocupada o reservada` : `Franja ${h}:00 disponible`}
                         className={`text-[10px] font-extrabold px-2 py-1 rounded-lg border transition cursor-pointer ${
                           isOccupied
-                            ? 'bg-slate-100 text-slate-400 line-through cursor-not-allowed border-slate-200'
+                            ? 'bg-rose-50 text-rose-400 line-through cursor-not-allowed border-rose-200 opacity-60'
                             : isSelected
                             ? 'bg-[#1e293b] text-white border-[#1e293b] shadow-xs'
                             : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
@@ -1057,19 +1158,49 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
             </div>
           ) : (
             <div className="space-y-2 pt-1">
+              {hasCollision && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-rose-900 text-xs">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold">Horario o Fecha Bloqueada</div>
+                    <div className="text-[11px] text-rose-700 mt-0.5 leading-snug">
+                      Este recinto ya cuenta con una reserva o solicitud activa para el {activeModality === 'por_hora' ? `horario ${hourStart}:00-${hourEnd}:00 hrs` : activeModality === 'mensual' ? `mes de ${selectedMonth}` : 'día seleccionado'}. Selecciona otro rango para evitar doble reserva.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={onStartBooking}
-                className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-bold text-xs shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                disabled={hasCollision}
+                className={`w-full py-3.5 rounded-2xl font-bold text-xs shadow-md transition flex items-center justify-center gap-2 ${
+                  hasCollision
+                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300 shadow-none'
+                    : 'bg-rose-600 hover:bg-rose-700 text-white hover:shadow-lg cursor-pointer'
+                }`}
               >
-                <span>
-                  {activeModality === 'por_dia'
-                    ? 'Continuar al Contrato Digital →'
-                    : activeModality === 'mensual'
-                    ? 'Postular / Solicitar Arriendo Mensual →'
-                    : 'Continuar a Reserva Inmediata →'}
-                </span>
+                {hasCollision ? (
+                  <>
+                    <Lock className="w-4 h-4 text-slate-400" />
+                    <span>No Disponible (Horario/Día Ocupado)</span>
+                  </>
+                ) : (
+                  <span>
+                    {activeModality === 'por_dia'
+                      ? 'Continuar al Contrato Digital →'
+                      : activeModality === 'mensual'
+                      ? 'Postular / Solicitar Arriendo Mensual →'
+                      : 'Continuar a Reserva Inmediata →'}
+                  </span>
+                )}
               </button>
+
+              <div className="flex items-center justify-center gap-1.5 text-[10px] font-semibold text-emerald-800 bg-emerald-50/80 py-1.5 px-3 rounded-xl border border-emerald-100">
+                <Check className="w-3 h-3 text-emerald-600 shrink-0" />
+                <span>Sincronizado con la agenda del propietario (Prevención Anti-Doble Reserva)</span>
+              </div>
+
               <p className="text-[10px] text-center text-slate-400">
                 No se realizará ningún cargo hasta la firma electrónica/aprobación.
               </p>

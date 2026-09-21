@@ -19,9 +19,11 @@ import {
   INITIAL_SPACES,
   INITIAL_RESERVATIONS,
   INITIAL_DISPUTES,
+  INITIAL_VISIT_REQUESTS,
 } from '../data/mockData.ts';
 import { saveAuditLog, getAuditLogs, getClientAuditMetadata } from '../utils/auditLogger.ts';
 import { generateDigitalContract } from '../utils/contractGenerator.ts';
+import { getTodayIso } from '../utils/formatters.ts';
 
 interface AppContextType {
   currentUser: UserProfile | null;
@@ -75,6 +77,15 @@ interface AppContextType {
     securityDepositClp: number;
     totalClp: number;
     intendedUse: string;
+    rentalModality?: 'por_hora' | 'por_dia' | 'mensual';
+    hourStart?: number;
+    hourEnd?: number;
+    timeSlotString?: string;
+    rentalMonth?: string;
+    durationUnits?: number;
+    priceUnit?: 'hour' | 'day' | 'month';
+    signatureImage?: string;
+    signatureType?: 'digital_canvas' | 'token_fea';
     paymentSimulation?: PaymentSimulationData;
   }) => Promise<{ reservation: Reservation; contract: DigitalContract }>;
   // Owner actions
@@ -223,9 +234,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [visitRequests, setVisitRequests] = useState<VisitRequest[]>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_VISIT_REQUESTS);
-      return stored ? JSON.parse(stored) : [];
+      return stored ? JSON.parse(stored) : INITIAL_VISIT_REQUESTS;
     } catch {
-      return [];
+      return INITIAL_VISIT_REQUESTS;
     }
   });
 
@@ -619,12 +630,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     totalClp: number;
     intendedUse: string;
     rentalModality?: 'por_hora' | 'por_dia' | 'mensual';
+    hourStart?: number;
+    hourEnd?: number;
+    timeSlotString?: string;
+    rentalMonth?: string;
+    durationUnits?: number;
+    priceUnit?: 'hour' | 'day' | 'month';
     signatureImage?: string;
     signatureType?: 'digital_canvas' | 'token_fea';
     paymentSimulation?: PaymentSimulationData;
   }): Promise<{ reservation: Reservation; contract: DigitalContract }> => {
     if (!currentUser) {
       throw new Error('Debes iniciar sesión para reservar un espacio.');
+    }
+
+    const todayStr = getTodayIso();
+    if (bookingData.startDate < todayStr) {
+      throw new Error('La fecha de la reserva debe ser desde el día actual hacia adelante.');
+    }
+    if (bookingData.endDate < bookingData.startDate) {
+      throw new Error('La fecha de término no puede ser anterior a la fecha de inicio.');
+    }
+
+    const modality = bookingData.rentalModality || bookingData.space.rentalModality || 'por_dia';
+
+    // VALIDACIÓN DE DISPONIBILIDAD ESTRICTA (ANTI-DOBLE RESERVA)
+    const activeBookings = reservations.filter(
+      (r) => r.spaceId === bookingData.space.id && r.status !== 'rejected' && r.status !== 'cancelled'
+    );
+
+    for (const existing of activeBookings) {
+      // Verificar si las fechas se solapan
+      const datesOverlap = bookingData.startDate <= existing.endDate && bookingData.endDate >= existing.startDate;
+      if (datesOverlap) {
+        // Caso 1: Ambas solicitudes son por hora en el mismo día
+        if (modality === 'por_hora' && existing.rentalModality === 'por_hora' && bookingData.startDate === existing.startDate) {
+          const newHStart = bookingData.hourStart ?? 9;
+          const newHEnd = bookingData.hourEnd ?? (newHStart + bookingData.totalDays);
+          const existHStart = existing.hourStart ?? 9;
+          const existHEnd = existing.hourEnd ?? (existHStart + (existing.durationUnits || existing.totalDays));
+
+          // Hay solapamiento si se cruzan los intervalos de horas
+          if (newHStart < existHEnd && newHEnd > existHStart) {
+            throw new Error(
+              `Conflicto de disponibilidad: El horario de ${newHStart}:00 a ${newHEnd}:00 del ${bookingData.startDate} ya se encuentra reservado en este recinto.`
+            );
+          }
+        } else {
+          // Caso 2: Al menos una reserva es de día completo o mensual -> bloqueo total de esas fechas
+          const isExistingHourly = existing.rentalModality === 'por_hora';
+          const isNewHourly = modality === 'por_hora';
+          if (isNewHourly && isExistingHourly && bookingData.startDate !== existing.startDate) {
+            // Son en días distintos dentro de un rango
+            continue;
+          }
+          throw new Error(
+            `Conflicto de disponibilidad: El recinto "${bookingData.space.title}" ya tiene una reserva activa para las fechas seleccionadas (${existing.startDate} al ${existing.endDate}). Selecciona otras fechas u horario disponible.`
+          );
+        }
+      }
     }
 
     const meta = getClientAuditMetadata();
@@ -644,7 +708,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       startDate: bookingData.startDate,
       endDate: bookingData.endDate,
       ip: meta.ip,
-      rentalModality: bookingData.rentalModality || bookingData.space.rentalModality,
+      rentalModality: modality,
+      priceUnit: bookingData.priceUnit || (modality === 'por_hora' ? 'hour' : modality === 'mensual' ? 'month' : 'day'),
+      durationUnits: bookingData.durationUnits || bookingData.totalDays,
       intendedUse: bookingData.intendedUse,
       signatureImage: bookingData.signatureImage,
       signatureType: bookingData.signatureType,
@@ -669,6 +735,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       endDate: bookingData.endDate,
       totalDays: bookingData.totalDays,
       dailyRateClp: bookingData.space.pricePerDay,
+      rentalModality: modality,
+      durationUnits: bookingData.durationUnits || bookingData.totalDays,
+      priceUnit: bookingData.priceUnit || (modality === 'por_hora' ? 'hour' : modality === 'mensual' ? 'month' : 'day'),
+      hourStart: bookingData.hourStart,
+      hourEnd: bookingData.hourEnd,
+      timeSlotString: bookingData.timeSlotString,
+      rentalMonth: bookingData.rentalMonth,
       subtotalClp: bookingData.subtotalClp,
       platformFeeClp: bookingData.platformFeeClp,
       securityDepositClp: bookingData.securityDepositClp,
@@ -853,6 +926,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Actualización de estado de reserva (ej. Propietario acepta o rechaza solicitud de reserva)
   const updateReservationStatus = (reservationId: string, status: ReservationStatus) => {
     const targetReservation = reservations.find(r => r.id === reservationId);
+
+    if (status === 'confirmed' && targetReservation) {
+      const todayStr = getTodayIso();
+      const resDate = targetReservation.endDate || targetReservation.startDate;
+      if (resDate < todayStr) {
+        throw new Error('No es posible aprobar una reserva cuya fecha ya transcurrió.');
+      }
+    }
 
     setReservations((prev) =>
       prev.map((res) => (res.id === reservationId ? { ...res, status } : res))

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Calendar as CalendarIcon, Clock, Check, Building2, Sparkles, X } from 'lucide-react';
-import { formatClp } from '../utils/formatters.ts';
+import { formatClp, getTodayIso } from '../utils/formatters.ts';
 
 interface SpaceAvailabilityViewerProps {
   modality: 'por_hora' | 'por_dia' | 'mensual';
@@ -25,14 +25,16 @@ export const SpaceAvailabilityViewer: React.FC<SpaceAvailabilityViewerProps> = (
   selectedHourEnd,
   onSelectHours,
 }) => {
-  // Generar días para vista por día (14 días en strip interactivo)
-  const baseDate = new Date(2026, 8, 18); // 18 de Septiembre 2026
+  // Generar días para vista por día (14 días en strip interactivo a partir de hoy)
+  const todayIso = getTodayIso();
+  const baseDate = new Date();
   const daysList = Array.from({ length: 14 }, (_, i) => {
     const d = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + i);
     const dayNum = d.getDate();
     const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const weekday = d.toLocaleDateString('es-CL', { weekday: 'short' });
     const isOccupied = dayNum === 24 || dayNum === 27;
+    const isPast = iso < todayIso;
     const isCheckIn = iso === startDate;
     const isCheckOut = iso === endDate;
     const isSelected = iso >= startDate && iso <= endDate;
@@ -43,6 +45,7 @@ export const SpaceAvailabilityViewer: React.FC<SpaceAvailabilityViewerProps> = (
       weekday,
       monthShort: 'sept',
       isOccupied,
+      isPast,
       isCheckIn,
       isCheckOut,
       isSelected,
@@ -111,7 +114,7 @@ export const SpaceAvailabilityViewer: React.FC<SpaceAvailabilityViewerProps> = (
                   key={day.iso}
                   type="button"
                   onClick={() => {
-                    if (day.isOccupied) return;
+                    if (day.isOccupied || day.isPast) return;
                     if (day.iso === startDate) {
                       // Ya es start
                     } else if (day.iso < startDate) {
@@ -120,13 +123,15 @@ export const SpaceAvailabilityViewer: React.FC<SpaceAvailabilityViewerProps> = (
                       onSelectDateRange(startDate, day.iso);
                     }
                   }}
-                  disabled={day.isOccupied}
-                  className={`p-2.5 sm:p-3 rounded-2xl border text-center transition flex flex-col items-center justify-between cursor-pointer ${
-                    day.isOccupied
+                  disabled={day.isOccupied || day.isPast}
+                  className={`p-2.5 sm:p-3 rounded-2xl border text-center transition flex flex-col items-center justify-between select-none ${
+                    day.isPast
+                      ? 'bg-slate-100/60 border-slate-200 text-slate-400 opacity-40 cursor-not-allowed'
+                      : day.isOccupied
                       ? 'bg-slate-50 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed'
                       : isSelected
-                      ? 'bg-[#1e293b] border-[#1e293b] text-white shadow-md'
-                      : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50'
+                      ? 'bg-[#1e293b] border-[#1e293b] text-white shadow-md cursor-pointer'
+                      : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50 cursor-pointer'
                   }`}
                 >
                   <span className={`text-[10px] uppercase font-bold ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>

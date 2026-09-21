@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Space, DigitalContract, PaymentSimulationData, VisitRequest } from '../types.ts';
 import { useApp } from '../context/AppContext.tsx';
-import { formatClp, formatRut } from '../utils/formatters.ts';
+import { formatClp, formatRut, getTodayIso, getOffsetDateIso } from '../utils/formatters.ts';
 import { SignatureCanvas } from './SignatureCanvas.tsx';
 import { WebpayPaymentBox } from './WebpayPaymentBox.tsx';
 import {
@@ -45,6 +45,9 @@ interface BookingModalProps {
   initialTimeSlots?: string[];
   initialIntendedUse?: string;
   hoursCount?: number;
+  initialHourStart?: number;
+  initialHourEnd?: number;
+  initialSelectedMonth?: string;
 }
 
 const CATEGORY_NAMES: Record<string, string> = {
@@ -85,6 +88,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   initialTimeSlots,
   initialIntendedUse,
   hoursCount,
+  initialHourStart = 10,
+  initialHourEnd = 14,
+  initialSelectedMonth = '2026-10',
 }) => {
   const { currentUser, createBooking, requestVisit, quickVerifyUser, savedCards } = useApp();
 
@@ -94,20 +100,26 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   // Pasos de Reserva: 1 = Contrato Digital Ley 18.101, 2 = Pago Seguro Webpay
   const [bookingStep, setBookingStep] = useState<1 | 2>(initialStep || 1);
 
-  // Fechas de reserva
-  const now = new Date();
-  const formatIso = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // Fechas de reserva (a partir del día de hoy en adelante)
+  const todayStr = getTodayIso();
+  const tomorrowStr = getOffsetDateIso(1);
+  const dayAfterTomorrowStr = getOffsetDateIso(2);
 
-  const tomorrowStr = formatIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
-  const dayAfterTomorrowStr = formatIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2));
-
-  const [startDate, setStartDate] = useState(initialStartDate || tomorrowStr);
-  const [endDate, setEndDate] = useState(initialEndDate || dayAfterTomorrowStr);
+  const [startDate, setStartDate] = useState(
+    initialStartDate && initialStartDate >= todayStr ? initialStartDate : todayStr
+  );
+  const [endDate, setEndDate] = useState(
+    initialEndDate && initialEndDate >= todayStr ? initialEndDate : tomorrowStr
+  );
   const [bookingTimeSlots, setBookingTimeSlots] = useState<string[]>(initialTimeSlots || []);
   const [intendedUse, setIntendedUse] = useState(initialIntendedUse || 'Reunión de equipo y coworking');
   const [acceptContract, setAcceptContract] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+
+  // Horas y mes seleccionados para reserva granular
+  const [hourStart, setHourStart] = useState<number>(initialHourStart);
+  const [hourEnd, setHourEnd] = useState<number>(initialHourEnd);
+  const [selectedMonth, setSelectedMonth] = useState<string>(initialSelectedMonth);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,10 +146,18 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       setBookingStep(initialStep !== undefined ? initialStep : 1);
       setError(null);
       setCreatedVisit(null);
-      if (initialStartDate) setStartDate(initialStartDate);
-      if (initialEndDate) setEndDate(initialEndDate);
+      const curToday = getTodayIso();
+      if (initialStartDate) {
+        setStartDate(initialStartDate >= curToday ? initialStartDate : curToday);
+      }
+      if (initialEndDate) {
+        setEndDate(initialEndDate >= curToday ? initialEndDate : getOffsetDateIso(1));
+      }
       if (initialTimeSlots) setBookingTimeSlots(initialTimeSlots);
       if (initialIntendedUse) setIntendedUse(initialIntendedUse);
+      if (initialHourStart !== undefined) setHourStart(initialHourStart);
+      if (initialHourEnd !== undefined) setHourEnd(initialHourEnd);
+      if (initialSelectedMonth) setSelectedMonth(initialSelectedMonth);
       if (initialModality) {
         setSelectedModality(initialModality);
       } else if (space) {
@@ -151,7 +171,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         setVisitorPhone(currentUser.phone || '+56 9 8765 4321');
       }
     }
-  }, [isOpen, initialMode, initialStep, currentUser, initialStartDate, initialEndDate, initialTimeSlots, initialIntendedUse, initialModality, space]);
+  }, [isOpen, initialMode, initialStep, currentUser, initialStartDate, initialEndDate, initialTimeSlots, initialIntendedUse, initialModality, initialHourStart, initialHourEnd, initialSelectedMonth, space]);
 
   // Cálculo de unidades y montos en CLP según modalidad
   const calculations = useMemo(() => {
@@ -210,10 +230,21 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       return;
     }
 
+    if (startDate < todayStr) {
+      setError('La fecha de la reserva debe ser desde el día actual hacia adelante.');
+      return;
+    }
+
+    if (endDate < startDate) {
+      setError('La fecha de término no puede ser anterior a la fecha de inicio.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
+      const activeModality = space!.rentalModality === 'abierto' ? selectedModality : (space!.rentalModality || selectedModality || 'por_dia');
       const res = await createBooking({
         space: space!,
         startDate,
@@ -227,6 +258,13 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         signatureImage: signatureDataUrl,
         signatureType: 'drawn',
         paymentSimulation: paymentData,
+        rentalModality: activeModality,
+        hourStart: activeModality === 'por_hora' ? hourStart : undefined,
+        hourEnd: activeModality === 'por_hora' ? hourEnd : undefined,
+        timeSlotString: activeModality === 'por_hora' ? `${String(hourStart).padStart(2, '0')}:00 a ${String(hourEnd).padStart(2, '0')}:00 hrs` : undefined,
+        rentalMonth: activeModality === 'mensual' ? selectedMonth : undefined,
+        durationUnits: calculations.units,
+        priceUnit: activeModality === 'por_hora' ? 'hour' : activeModality === 'mensual' ? 'month' : 'day',
       });
 
       onClose();
@@ -498,9 +536,28 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                         <strong>Primero:</strong> El Arrendador da en arriendo el Inmueble detallado precedentemente al Arrendatario, quien lo acepta para el uso exclusivo de: <strong>{intendedUse || 'Reunión de equipo y coworking'}</strong>.
                       </p>
                       
-                      <p>
-                        <strong>Segundo:</strong> La vigencia de este contrato será desde el <strong>{startDate || '2026-09-19'}</strong> hasta el <strong>{endDate || '2026-09-20'}</strong>, comprendiendo un total de <strong>{calculations.units} {calculations.label}</strong>.
-                      </p>
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                        <p>
+                          <strong>Segundo (Vigencia y Horario):</strong>{' '}
+                          {selectedModality === 'por_hora' ? (
+                            <span>
+                              La vigencia y ocupación será el día <strong>{startDate || todayStr}</strong>, en el horario exacto de <strong>{String(hourStart).padStart(2, '0')}:00 a {String(hourEnd).padStart(2, '0')}:00 hrs</strong> ({calculations.units} {calculations.label} cronológicas continuas). Dicha franja horaria queda bloqueada y sincronizada exclusivamente para el arrendatario en el sistema Spotly.
+                            </span>
+                          ) : selectedModality === 'mensual' ? (
+                            <span>
+                              La vigencia del arriendo mensual corresponde al mes <strong>{selectedMonth || 'Octubre 2026'}</strong> ({calculations.units} {calculations.label}), con ocupación exclusiva bajo el marco de la Ley N° 18.101. El espacio queda bloqueado en el calendario durante todo el período.
+                            </span>
+                          ) : (
+                            <span>
+                              La vigencia de este contrato será desde el día <strong>{startDate || todayStr}</strong> hasta el día <strong>{endDate || tomorrowStr}</strong>, comprendiendo un total de <strong>{calculations.units} {calculations.label} completos</strong>.
+                            </span>
+                          )}
+                        </p>
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-700 pt-1">
+                          <Lock className="w-3.5 h-3.5 shrink-0" />
+                          <span>Bloqueo Activo: Se reserva y bloquea este horario/fecha para evitar doble reserva con otros clientes.</span>
+                        </div>
+                      </div>
                       
                       <p>
                         <strong>Tercero:</strong> El valor acordado para este período es de <strong>{formatClp(calculations.subtotal)}</strong>, más una garantía retornable de <strong>{formatClp(calculations.deposit)}</strong>, totalizando a pagar <strong>{formatClp(calculations.total)}</strong> (incluyendo tarifas de servicio).

@@ -170,6 +170,10 @@ export interface Reservation {
   priceUnit?: PriceUnit;
   durationUnits?: number;
   rentalModality?: 'por_hora' | 'por_dia' | 'mensual' | 'abierto';
+  hourStart?: number;
+  hourEnd?: number;
+  timeSlotString?: string;
+  rentalMonth?: string;
   subtotalClp: number;
   platformFeeClp: number;
   securityDepositClp: number;

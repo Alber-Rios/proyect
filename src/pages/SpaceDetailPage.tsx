@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Space, DigitalContract } from '../types.ts';
 import { useApp } from '../context/AppContext.tsx';
-import { formatClp, formatRut } from '../utils/formatters.ts';
+import { formatClp, formatRut, getTodayIso, getOffsetDateIso } from '../utils/formatters.ts';
 import { BookingModal } from '../components/BookingModal.tsx';
 import { ContractModal } from '../components/ContractModal.tsx';
 import { SpaceLocationMap } from '../components/SpaceLocationMap.tsx';
@@ -91,9 +91,11 @@ export const SpaceDetailPage: React.FC<SpaceDetailPageProps> = ({
     setActiveModality(defaultModality);
   }, [defaultModality]);
 
-  // Estado de fechas y horas
-  const [startDate, setStartDate] = useState('2026-09-19');
-  const [endDate, setEndDate] = useState('2026-09-20');
+  // Estado de fechas y horas (siempre desde hoy en adelante)
+  const todayStr = useMemo(() => getTodayIso(), []);
+  const tomorrowStr = useMemo(() => getOffsetDateIso(1), []);
+  const [startDate, setStartDate] = useState(todayStr);
+  const [endDate, setEndDate] = useState(tomorrowStr);
   const [selectedMonth, setSelectedMonth] = useState('2026-10');
   const [hourStart, setHourStart] = useState(10);
   const [hourEnd, setHourEnd] = useState(14);
@@ -155,6 +157,12 @@ export const SpaceDetailPage: React.FC<SpaceDetailPageProps> = ({
       if (onOpenAuth) {
         onOpenAuth('login', 'Debes iniciar sesión o registrarte para formalizar tu reserva en este espacio.');
       }
+      return;
+    }
+    const currentToday = getTodayIso();
+    if (startDate < currentToday) {
+      alert('La fecha seleccionada no puede ser anterior al día de hoy. Hemos ajustado la fecha de inicio a hoy.');
+      setStartDate(currentToday);
       return;
     }
     setBookingModalMode('booking');
@@ -607,6 +615,9 @@ export const SpaceDetailPage: React.FC<SpaceDetailPageProps> = ({
         initialEndDate={endDate}
         initialIntendedUse={intendedUse}
         hoursCount={hourEnd - hourStart}
+        initialHourStart={hourStart}
+        initialHourEnd={hourEnd}
+        initialSelectedMonth={selectedMonth}
         onSuccess={(contract) => {
           setCreatedContract(contract);
           setIsContractModalOpen(true);
