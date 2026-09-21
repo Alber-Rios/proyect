@@ -299,8 +299,42 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
 
       {/* PESTAÑA 1: MIS DATOS PERSONALES (ACTUALIZABLES) */}
       {activeTab === 'details' && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
-          <div className="flex items-center justify-between">
+        <div className="space-y-6">
+          {/* BANNER DE ESTADO DE VERIFICACIÓN (AI Spotly) */}
+          {currentUser.verificationStatus !== 'verified' && (
+            <div className={`p-5 rounded-3xl border flex flex-col sm:flex-row items-center gap-5 shadow-xs animate-in slide-in-from-top duration-500 ${
+              currentUser.verificationStatus === 'pending' 
+                ? 'bg-amber-50 border-amber-200' 
+                : 'bg-indigo-50 border-indigo-200'
+            }`}>
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+                currentUser.verificationStatus === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'
+              }`}>
+                {currentUser.verificationStatus === 'pending' ? <Clock className="w-7 h-7" /> : <ShieldCheck className="w-7 h-7" />}
+              </div>
+              <div className="flex-1 text-center sm:text-left space-y-1">
+                <h3 className={`text-sm font-black ${currentUser.verificationStatus === 'pending' ? 'text-amber-950' : 'text-indigo-950'}`}>
+                  {currentUser.verificationStatus === 'pending' ? 'Tu verificación está en proceso' : 'Mejora tu seguridad: Verifica tu Identidad'}
+                </h3>
+                <p className={`text-xs leading-relaxed ${currentUser.verificationStatus === 'pending' ? 'text-amber-800' : 'text-indigo-800'}`}>
+                  {currentUser.verificationStatus === 'pending' 
+                    ? 'Nuestro equipo está revisando tus documentos. Este proceso suele tardar menos de 48 horas hábiles.' 
+                    : 'Para emitir contratos legales y procesar pagos en Spotly, debes completar el escaneo inteligente de tu cédula.'}
+                </p>
+              </div>
+              {currentUser.verificationStatus !== 'pending' && (
+                <button
+                  onClick={() => onNavigate('onboarding')}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-indigo-600/20 whitespace-nowrap cursor-pointer"
+                >
+                  Verificar Ahora
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
+            <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Edit3 className="w-4 h-4 text-rose-600" />
@@ -455,9 +489,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
             </div>
           </form>
         </div>
-      )}
+      </div>
+    )}
 
-      {/* PESTAÑA 2: MIS RESERVAS */}
+    {/* PESTAÑA 2: MIS RESERVAS */}
       {activeTab === 'reservations' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200">

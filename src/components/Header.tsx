@@ -139,7 +139,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Verificación (solo si el usuario ya está verificado o es admin) */}
               {currentUser && currentUser.verificationStatus === 'verified' && (
                 <button
-                  id="nav-kyc-btn"
+                  id="nav-kyc-verified-btn"
                   onClick={() => onNavigate('onboarding')}
                   className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 ${
                     currentView === 'onboarding'
@@ -149,6 +149,22 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <UserCheck className="w-4 h-4 text-emerald-600" />
                   Verificación OK
+                </button>
+              )}
+
+              {/* Verificación Pendiente / Iniciar (si NO está verificado) */}
+              {currentUser && currentUser.verificationStatus !== 'verified' && (
+                <button
+                  id="nav-kyc-start-btn"
+                  onClick={() => onNavigate('onboarding')}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 animate-pulse-subtle ${
+                    currentView === 'onboarding'
+                      ? 'bg-amber-50 text-amber-800 font-semibold'
+                      : 'text-amber-700 hover:text-amber-900 hover:bg-amber-50'
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  {currentUser.verificationStatus === 'pending' ? 'Revisión en Proceso' : 'Verificar Mi Cuenta'}
                 </button>
               )}
 

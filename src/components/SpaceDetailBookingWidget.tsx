@@ -1156,6 +1156,39 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
                 Solo usuarios verificados pueden suscribir contratos de arriendo y procesar pagos.
               </p>
             </div>
+          ) : currentUser.verificationStatus !== 'verified' ? (
+            <div className="space-y-3 pt-1">
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-2.5 shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-amber-950">Se requiere verificación para reservar</h4>
+                    <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                      Por normativa de seguridad, solo usuarios con **Perfil Verificado** pueden emitir contratos y realizar pagos en Spotly.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => (window.location.hash = '#onboarding')}
+                  className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                >
+                  <FileCheck2 className="w-3.5 h-3.5" />
+                  <span>Verificar mi Identidad Ahora</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                disabled
+                className="w-full py-3.5 bg-slate-100 text-slate-400 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 cursor-not-allowed border border-slate-200"
+              >
+                <Lock className="w-4 h-4 opacity-50" />
+                <span>Bloqueado • Falta Verificación</span>
+              </button>
+            </div>
           ) : (
             <div className="space-y-2 pt-1">
               {hasCollision && (
@@ -1197,13 +1230,9 @@ export const SpaceDetailBookingWidget: React.FC<SpaceDetailBookingWidgetProps> =
               </button>
 
               <div className="flex items-center justify-center gap-1.5 text-[10px] font-semibold text-emerald-800 bg-emerald-50/80 py-1.5 px-3 rounded-xl border border-emerald-100">
-                <Check className="w-3 h-3 text-emerald-600 shrink-0" />
-                <span>Sincronizado con la agenda del propietario (Prevención Anti-Doble Reserva)</span>
+                <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                <span>Perfil verificado • Protección legal Spotly activa</span>
               </div>
-
-              <p className="text-[10px] text-center text-slate-400">
-                No se realizará ningún cargo hasta la firma electrónica/aprobación.
-              </p>
             </div>
           )}
 

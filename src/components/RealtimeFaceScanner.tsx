@@ -35,20 +35,19 @@ export const RealtimeFaceScanner: React.FC<RealtimeFaceScannerProps> = ({
       animFrameId.current = null;
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((track) => {
+        track.stop();
+        streamRef.current?.removeTrack(track);
+      });
       streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setIsCameraActive(false);
     setIsFaceDetected(false);
     setScanProgress(0);
   }, []);
-
-  // Limpieza al desmontar
-  useEffect(() => {
-    return () => {
-      stopCamera();
-    };
-  }, [stopCamera]);
 
   // Capturar fotograma actual del video
   const captureCurrentFrame = useCallback(() => {
@@ -197,7 +196,8 @@ export const RealtimeFaceScanner: React.FC<RealtimeFaceScannerProps> = ({
   }, [captureCurrentFrame, isCapturing, capturedPhoto]);
 
   // Iniciar cámara web
-  const startCamera = async () => {
+  const startCamera = useCallback(async () => {
+    stopCamera();
     setCameraError(null);
     setCapturedPhoto(null);
     consecutiveFaceFrames.current = 0;
@@ -207,27 +207,41 @@ export const RealtimeFaceScanner: React.FC<RealtimeFaceScannerProps> = ({
         throw new Error('Tu navegador o dispositivo no soporta acceso directo a cámara web.');
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user',
-        },
-        audio: false,
-      });
+      setIsCameraActive(true);
 
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      let stream: MediaStream | null = null;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user',
+          },
+          audio: false,
+        });
+      } catch {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user' },
+            audio: false,
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
       }
 
-      setIsCameraActive(true);
-      setDetectionMessage('Buscando rostro en el visor...');
-      animFrameId.current = requestAnimationFrame(runFaceDetectionLoop);
+      if (!stream) {
+        throw new Error('No se pudo acceder a la cámara.');
+      }
+
+      streamRef.current = stream;
     } catch (err: any) {
       console.error('Error al acceder a la cámara:', err);
-      let msg = 'No se pudo acceder a la cámara.';
+      let msg = 'No se pudo acceder a la cámara frontal. Revisa los permisos de tu navegador.';
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         msg = 'Permiso denegado para acceder a la cámara. Habilítalo en tu navegador.';
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
@@ -236,7 +250,41 @@ export const RealtimeFaceScanner: React.FC<RealtimeFaceScannerProps> = ({
       setCameraError(msg);
       setIsCameraActive(false);
     }
-  };
+  }, [stopCamera]);
+
+  // Vincular el stream al elemento <video> cuando se renderice
+  useEffect(() => {
+    if (isCameraActive && streamRef.current && videoRef.current) {
+      const video = videoRef.current;
+      video.srcObject = streamRef.current;
+
+      const handlePlay = () => {
+        setDetectionMessage('Buscando rostro en el visor...');
+        if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
+        animFrameId.current = requestAnimationFrame(runFaceDetectionLoop);
+      };
+
+      video.onloadedmetadata = () => {
+        video.play().then(handlePlay).catch((err) => console.error('Error al reproducir:', err));
+      };
+
+      if (video.readyState >= 1) {
+        video.play().then(handlePlay).catch((err) => console.error('Error al reproducir:', err));
+      }
+    }
+  }, [isCameraActive, runFaceDetectionLoop]);
+
+  // Limpieza al desmontar e inicio automático
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      startCamera();
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+      stopCamera();
+    };
+  }, [startCamera, stopCamera]);
 
   // Carga manual como alternativa si no tiene cámara
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
